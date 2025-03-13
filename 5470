@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+
+import sys
+import time
+import threading
+import logging
+import hashlib
+import json
+from flask import Flask, jsonify, request
+from flask_jwt_extended import JWTManager
+import psycopg2.pool
+from dotenv import load_dotenv
+import os
+
+# Cargar variables de entorno
+load_dotenv()
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("blockchain.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Inicializar la aplicación Flask
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'TU_CLAVE_SECRETA_AQUI')
+jwt = JWTManager(app)
+
+# Configuración de la blockchain
+TOKEN_NAME = "MyICOToken"
+TOKEN_SYMBOL = "MIT"
+TOKEN_SUPPLY = 5470000  # Total de tokens para la ICO
+BLOCK_TIME = 10  # Tiempo entre bloques en segundos
+
+# Conexión a PostgreSQL
+DB_URL = os.getenv('DB_URL', 'dbname=blockchain user=postgres password=TU_CONTRASEÑA host=localhost port=5432')
+db_pool = psycopg2.pool.ThreadedConnectionPool(1, 50, DB_URL)
+
+# Función oculta para validar bloques usando un algoritmo de IA
+def validate_block_with_hidden_model(nn_input):
+    """
+    Esta función oculta la lógica interna de validación con IA.
+    Su implementación real se encuentra en un módulo compilado o se ofusca.
+    Por ahora, se simula una validación exitosa.
+    """
+    return True
+
+# Código del "heartbeat" fuera de los endpoints
+def log_heartbeat():
+    while True:
+        with open("blockchain_heartbeat.log", "a") as log_file:
+            log_file.write(f"{time.ctime()}: Servidor activo\n")
+        time.sleep(60)  # Escribe cada 60 segundos
+
+threading.Thread(target=log_heartbeat, daemon=True).start()
+
+# Clase para transacciones
+class Transaction:
+    def __init__(self, sender, receiver, amount, signature=None):
+        self.sender = sender
+        self.receiver = receiver
+        self.amount = amount
+        self.signature = signature
+
+    def to_dict(self):
+        return {
+            "sender": self.sender,
+            "receiver": self.receiver,
+            "amount": self.amount,
+            "signature": self.signature
+        }
+
+# Clase para bloques
+class Block:
+    def __init__(self, index, transactions, timestamp, previous_hash, nonce=0):
+        self.index = index
+        self.transactions = transactions
+        self.timestamp = timestamp
+        self.previous_hash = previous_hash
+        self.nonce = nonce
+        self.hash = self.calculate_hash()
+
+    def calculate_hash(self):
+        block_string = json.dumps({
+            "index": self.index,
+            "transactions": [t.to_dict() for t in self.transactions],
+            "timestamp": self.timestamp,
+            "previous_hash": self.previous_hash,
+            "nonce": self.nonce
+        }, sort_keys=True).encode()
+        return hashlib.sha256(block_string).hexdigest()
+
+# Clase Blockchain
+class Blockchain:
+    def __init__(self):
+        self.chain = self.load_chain_from_db()
+        self.pending_transactions = []
+
+    def load_chain_from_db(self):
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM blockchain ORDER BY index")
+                chain = [json.loads(row[0]) for row in cur.fetchall()]
+                return [Block(b["index"], [Transaction(**t) for t in b["transactions"]],
+                              b["timestamp"], b["previous_hash"], b["nonce"]) for b in chain]
+        except Exception as e:
+            logging.error(f"Error cargando cadena desde DB: {e}")
+            return [Block(0, [], time.time(), "0")]  # Bloque génesis si falla
+        finally:
+            db_pool.putconn(conn)
+
+blockchain = Blockchain()
+
+# Endpoints
+@app.route('/chain', methods=['GET'])
+def get_chain():
+    chain_data = [{"index": block.index, "hash": block.hash,
+                   "transactions": [t.to_dict() for t in block.transactions]}
+                  for block in blockchain.chain]
+    return jsonify({"chain": chain_data, "length": len(blockchain.chain)})
+
+@app.route('/pending_transactions', methods=['GET'])
+def get_pending_transactions():
+    return jsonify([t.to_dict() for t in blockchain.pending_transactions])
+
+@app.route('/propose_block', methods=['POST'])
+def propose_block():
+    block_data = request.get_json()
+    transactions = [Transaction(**t) for t in block_data["transactions"]]
+    new_block = Block(
+        block_data["index"],
+        transactions,
+        block_data["timestamp"],
+        block_data["previous_hash"],
+        block_data["nonce"]
+    )
+    # Validar bloque utilizando la función oculta de IA
+    nn_input = [len(transactions), block_data["timestamp"], len(blockchain.chain), new_block.nonce]
+    if validate_block_with_hidden_model(nn_input):
+        blockchain.chain.append(new_block)
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO blockchain (index, data) VALUES (%s, %s)",
+                            (new_block.index, json.dumps(block_data)))
+                conn.commit()
+            blockchain.pending_transactions.clear()
+            return jsonify({"message": "Bloque añadido"}), 201
+        except Exception as e:
+            logging.error(f"Error guardando bloque en DB: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            db_pool.putconn(conn)
+    else:
+        return jsonify({"error": "Bloque no validado por el modelo de IA"}), 400
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000, threaded=True)
