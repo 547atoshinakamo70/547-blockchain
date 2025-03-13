@@ -31,8 +31,8 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'TU_CLAVE_SECRETA_AQU
 jwt = JWTManager(app)
 
 # Configuración de la blockchain
-TOKEN_NAME = "MyICOToken"
-TOKEN_SYMBOL = "MIT"
+TOKEN_NAME = "5470"
+TOKEN_SYMBOL = "547"
 TOKEN_SUPPLY = 5470000  # Total de tokens para la ICO
 BLOCK_TIME = 10  # Tiempo entre bloques en segundos
 
