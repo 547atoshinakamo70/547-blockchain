@@ -72,9 +72,6 @@ def generate_key_pair():
     Genera un par de claves pública/privada ECDSA.
     Retorna las claves en formato PEM (como cadena de texto).
     """
-    # Genera una clave privada (usando RSA en este ejemplo, aunque para ECDSA usarías otro método)
-    # Si deseas usar ECDSA, debes emplear la función de la librería 'ecdsa'
-    # Aquí usamos RSA como ejemplo alternativo
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
 
@@ -97,7 +94,6 @@ def generate_key_pair():
 def create_nn_model():
     """
     Crea un modelo de red neuronal real con TensorFlow para la validación de transacciones.
-    Se espera que el modelo reciba un vector de 4 características y devuelva un valor entre 0 y 1.
     """
     model = tf.keras.Sequential([
         layers.Input(shape=(4,)),
@@ -106,27 +102,14 @@ def create_nn_model():
         layers.Dense(1, activation='sigmoid')
     ])
     model.compile(optimizer='adam', loss='binary_crossentropy')
-    # Nota: En un escenario real, el modelo debería entrenarse con datos históricos.
     return model
 
 # Instanciar el modelo de IA
 nn_model = create_nn_model()
 
-def train_hidden_model(model, transactions):
-    """
-    Función de entrenamiento (simulada en este ejemplo).
-    """
-    logging.info("Entrenamiento del modelo completado (simulado).")
-
 def validate_with_hidden_model(model, transaction):
     """
     Extrae características de la transacción y utiliza el modelo para predecir.
-    Se consideran 4 características:
-      - feature1: Los primeros 8 caracteres de 'from_address' convertidos a entero (si no es 'genesis').
-      - feature2: Los primeros 8 caracteres de 'to_address' convertidos a entero.
-      - feature3: El monto de la transacción.
-      - feature4: El timestamp.
-    Retorna True si la predicción es mayor a 0.5, False en caso contrario.
     """
     try:
         if transaction.from_address != "genesis":
@@ -226,7 +209,7 @@ class Blockchain:
         self.chain = []
         self.pending_transactions = []
         self.balances = {}
-        self.peers = []  # Lista de peers para comunicación P2P
+        self.peers = []
         self.commissions_collected = 0
         self.owner_private_key, self.owner_public_key = self.create_genesis_block()
 
@@ -377,12 +360,8 @@ class Blockchain:
         return self.peers
 
 ###############################################
-# Fin del módulo blockchain_core
+# Servidor HTTP para interactuar con la blockchain
 ###############################################
-
-# Se expone un servidor HTTP mínimo para interactuar con la blockchain
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
@@ -400,6 +379,18 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
         elif self.path == "/peers":
             self._set_headers()
             self.wfile.write(json.dumps({"peers": blockchain.get_peers()}).encode())
+        elif self.path.startswith("/balance"):
+            try:
+                address = self.path.split("?address=")[1]  # Ejemplo: /balance?address=tu_direccion
+                balance = blockchain.balances.get(address, 0)
+                self._set_headers()
+                self.wfile.write(json.dumps({"address": address, "balance": balance}).encode())
+            except IndexError:
+                self._set_headers(400)
+                self.wfile.write(json.dumps({"error": "Address parameter missing"}).encode())
+            except Exception as e:
+                self._set_headers(500)
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
         else:
             self._set_headers(404)
             self.wfile.write(json.dumps({"error": "Endpoint not found"}).encode())
