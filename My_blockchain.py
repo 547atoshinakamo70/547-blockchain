@@ -41,7 +41,7 @@ BLOCK_TIME = 10            # Tiempo entre bloques en segundos
 NUM_NODES = 5              # Número de nodos en la red (simulado)
 DB_URL = os.getenv('DATABASE_URL', 'dbname=blockchain user=postgres password=YOUR_DB_PASSWORD host=localhost')
 KYC_API_URL = os.getenv('KYC_API_URL', 'https://YOUR_KYC_API_URL/verify')
-BLOCK_REWARD_INITIAL = 50    # Recompensa inicial por bloque (similar a Bitcoin)
+BLOCK_REWARD_INITIAL = 50    # Recompensa inicial por bloque
 COMMISSION_RATE = 0.002      # 0.2% de comisión por transacción
 
 print(f"Intentando conectar con: {DB_URL}")
@@ -62,15 +62,15 @@ FERNET_KEY = os.getenv('FERNET_KEY', Fernet.generate_key().decode()).encode()
 cipher = Fernet(FERNET_KEY)
 
 ###############################################
-# Función para generar par de claves ECDSA
+# Función para generar par de claves (RSA ejemplo)
 ###############################################
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
 def generate_key_pair():
     """
-    Genera un par de claves pública/privada ECDSA.
-    Retorna las claves en formato PEM (como cadena de texto).
+    Genera un par de claves utilizando RSA (para un ejemplo).
+    Retorna la clave privada y la clave pública en formato PEM (cadena de texto).
     """
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
@@ -89,11 +89,12 @@ def generate_key_pair():
     return private_pem, public_pem
 
 ###############################################
-# Sección de IA: Exponiendo el modelo real
+# Sección de IA: Modelo real para validación de transacciones
 ###############################################
 def create_nn_model():
     """
     Crea un modelo de red neuronal real con TensorFlow para la validación de transacciones.
+    Se espera que el modelo reciba un vector de 4 características y devuelva un valor entre 0 y 1.
     """
     model = tf.keras.Sequential([
         layers.Input(shape=(4,)),
@@ -107,9 +108,21 @@ def create_nn_model():
 # Instanciar el modelo de IA
 nn_model = create_nn_model()
 
+def train_hidden_model(model, transactions):
+    """
+    Función de entrenamiento (simulada en este ejemplo).
+    """
+    logging.info("Entrenamiento del modelo completado (simulado).")
+
 def validate_with_hidden_model(model, transaction):
     """
     Extrae características de la transacción y utiliza el modelo para predecir.
+    Se consideran 4 características:
+      - feature1: Primeros 8 caracteres de 'from_address' convertidos a entero (si no es 'genesis').
+      - feature2: Primeros 8 caracteres de 'to_address' convertidos a entero.
+      - feature3: El monto de la transacción.
+      - feature4: El timestamp.
+    Retorna True si la predicción es mayor a 0.5, False en caso contrario.
     """
     try:
         if transaction.from_address != "genesis":
@@ -202,14 +215,14 @@ class Block:
         return hashlib.sha256(block_string).hexdigest()
 
 ###############################################
-# Clase para la blockchain
+# Clase para la blockchain (con funcionalidad P2P)
 ###############################################
 class Blockchain:
     def __init__(self):
         self.chain = []
         self.pending_transactions = []
         self.balances = {}
-        self.peers = []
+        self.peers = []  # Lista de peers para comunicación P2P
         self.commissions_collected = 0
         self.owner_private_key, self.owner_public_key = self.create_genesis_block()
 
@@ -219,6 +232,9 @@ class Blockchain:
         genesis_block = Block(0, [genesis_tx], time.time(), "0")
         self.chain.append(genesis_block)
         self.balances[public_key] = TOKEN_SUPPLY
+        # Imprimir claves del propietario para referencia (en producción, se debe mantener privada la clave privada)
+        print("Clave privada del propietario:", private_key)
+        print("Clave pública del propietario:", public_key)
         return private_key, public_key
 
     def get_block_reward(self, index):
@@ -360,8 +376,14 @@ class Blockchain:
         return self.peers
 
 ###############################################
+# Fin del módulo blockchain_core
+###############################################
+
+###############################################
 # Servidor HTTP para interactuar con la blockchain
 ###############################################
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
@@ -381,7 +403,7 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"peers": blockchain.get_peers()}).encode())
         elif self.path.startswith("/balance"):
             try:
-                address = self.path.split("?address=")[1]  # Ejemplo: /balance?address=tu_direccion
+                address = self.path.split("?address=")[1]
                 balance = blockchain.balances.get(address, 0)
                 self._set_headers()
                 self.wfile.write(json.dumps({"address": address, "balance": balance}).encode())
@@ -443,6 +465,9 @@ def run_server(server_class=HTTPServer, handler_class=BlockchainHTTPRequestHandl
     logging.info(f"Starting blockchain server on port {port}...")
     httpd.serve_forever()
 
+###############################################
+# Ejecución principal
+###############################################
 if __name__ == "__main__":
     # Iniciar la blockchain
     blockchain = Blockchain()
