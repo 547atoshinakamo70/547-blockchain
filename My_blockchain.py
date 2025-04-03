@@ -36,9 +36,9 @@ logging.basicConfig(
 # Parámetros de la blockchain e ICO
 TOKEN_NAME = "5470"
 TOKEN_SYMBOL = "547"
-TOKEN_SUPPLY = 5470000       # Total de tokens para la ICO
-BLOCK_TIME = 10            # Tiempo entre bloques en segundos
-NUM_NODES = 5              # Número de nodos en la red (simulado)
+TOKEN_SUPPLY = 5470000       # Oferta total (se minará gradualmente)
+BLOCK_TIME = 10              # Tiempo entre bloques en segundos
+NUM_NODES = 5                # Número de nodos en la red (simulado)
 DB_URL = os.getenv('DATABASE_URL', 'dbname=blockchain user=postgres password=YOUR_DB_PASSWORD host=localhost')
 KYC_API_URL = os.getenv('KYC_API_URL', 'https://YOUR_KYC_API_URL/verify')
 BLOCK_REWARD_INITIAL = 50    # Recompensa inicial por bloque
@@ -224,15 +224,18 @@ class Blockchain:
         self.balances = {}
         self.peers = []  # Lista de peers para comunicación P2P
         self.commissions_collected = 0
+        # Crear el bloque génesis sin asignar tokens automáticamente
         self.owner_private_key, self.owner_public_key = self.create_genesis_block()
 
     def create_genesis_block(self):
         private_key, public_key = generate_key_pair()
-        genesis_tx = Transaction("genesis", public_key, TOKEN_SUPPLY, time.time(), {"ico": True})
+        # Se crea el bloque génesis sin asignar tokens (0 tokens en la transacción génesis)
+        genesis_tx = Transaction("genesis", public_key, 0, time.time(), {"ico": False})
         genesis_block = Block(0, [genesis_tx], time.time(), "0")
         self.chain.append(genesis_block)
-        self.balances[public_key] = TOKEN_SUPPLY
-        # Imprimir claves del propietario para referencia (en producción, se debe mantener privada la clave privada)
+        # Establece el balance inicial en 0 para el propietario
+        self.balances[public_key] = 0
+        # Imprimir claves del propietario para referencia (en producción, la clave privada debe mantenerse en secreto)
         print("Clave privada del propietario:", private_key)
         print("Clave pública del propietario:", public_key)
         return private_key, public_key
