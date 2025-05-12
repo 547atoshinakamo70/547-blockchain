@@ -219,13 +219,20 @@ class Block:
 ###############################################
 class Blockchain:
     def __init__(self):
-        self.chain = []
+        # 1) Cargo la cadena y los balances de la BD
+        self.chain = self.load_chain_from_db()
+        self.balances = self.load_balances_from_db()
         self.pending_transactions = []
-        self.balances = {}
-        self.peers = []  # Lista de peers para comunicación P2P
+        self.peers = []
         self.commissions_collected = 0
-        # Crear el bloque génesis sin asignar tokens automáticamente
-        self.owner_private_key, self.owner_public_key = self.create_genesis_block()
+
+        # 2) Si no hay bloques, creo el génesis y asigno los tokens
+        if not self.chain:
+            self.owner_private_key, self.owner_public_key = self.create_genesis_block()
+        else:
+            # Opcional: si quieres imprimir la dirección propietaria al reiniciar:
+            print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
+
 
     def create_genesis_block(self):
         private_key, public_key = generate_key_pair()
