@@ -19,6 +19,10 @@ from tensorflow.keras import layers, models
 import numpy as np
 from dotenv import load_dotenv
 import requests
+import ssl
+
+# Deshabilitar la GPU para evitar errores de CUDA
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 # Cargar variables de entorno desde .env
 load_dotenv()
@@ -69,7 +73,7 @@ from cryptography.hazmat.primitives import serialization
 
 def generate_key_pair():
     """
-    Genera un par de claves utilizando RSA (para un ejemplo).
+    Genera un par de claves utilizando RSA.
     Retorna la clave privada y la clave pública en formato PEM (cadena de texto).
     """
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -89,12 +93,12 @@ def generate_key_pair():
     return private_pem, public_pem
 
 ###############################################
-# Sección de IA: Modelo real para validación de transacciones
+# Sección de IA: Modelo para validación de transacciones
 ###############################################
 def create_nn_model():
     """
-    Crea un modelo de red neuronal real con TensorFlow para la validación de transacciones.
-    Se espera que el modelo reciba un vector de 4 características y devuelva un valor entre 0 y 1.
+    Crea un modelo de red neuronal con TensorFlow para validar transacciones.
+    Recibe un vector de 4 características y devuelve un valor entre 0 y 1.
     """
     model = tf.keras.Sequential([
         layers.Input(shape=(4,)),
@@ -108,34 +112,18 @@ def create_nn_model():
 # Instanciar el modelo de IA
 nn_model = create_nn_model()
 
-def train_hidden_model(model, transactions):
-    """
-    Función de entrenamiento (simulada en este ejemplo).
-    """
-    logging.info("Entrenamiento del modelo completado (simulado).")
-
 def validate_with_hidden_model(model, transaction):
     """
-    Extrae características de la transacción y utiliza el modelo para predecir.
-    Se consideran 4 características:
-      - feature1: Primeros 8 caracteres de 'from_address' convertidos a entero (si no es 'genesis').
-      - feature2: Primeros 8 caracteres de 'to_address' convertidos a entero.
-      - feature3: El monto de la transacción.
-      - feature4: El timestamp.
-    Retorna True si la predicción es mayor a 0.5, False en caso contrario.
+    Valida una transacción usando el modelo de IA.
+    Características: from_address (8 primeros caracteres), to_address, amount, timestamp.
+    Retorna True si la predicción es mayor a 0.5.
     """
     try:
-        if transaction.from_address != "genesis":
-            feature1 = float(int(transaction.from_address[:8], 16))
-        else:
-            feature1 = 0.0
+        feature1 = float(int(transaction.from_address[:8], 16)) if transaction.from_address != "genesis" else 0.0
     except Exception:
         feature1 = 0.0
     try:
-        if transaction.to_address != "genesis":
-            feature2 = float(int(transaction.to_address[:8], 16))
-        else:
-            feature2 = 0.0
+        feature2 = float(int(transaction.to_address[:8], 16)) if transaction.to_address != "genesis" else 0.0
     except Exception:
         feature2 = 0.0
 
@@ -160,12 +148,13 @@ class Transaction:
         self.zk_proof = None
 
     def to_dict(self):
+        encrypted_metadata = cipher.encrypt(json.dumps(self.metadata).encode()).decode()
         return {
             "from": self.from_address,
             "to": self.to_address,
             "amount": self.amount,
             "timestamp": self.timestamp,
-            "metadata": self.metadata,
+            "metadata": encrypted_metadata,
             "signature": self.signature,
             "zk_proof": self.zk_proof
         }
@@ -215,45 +204,70 @@ class Block:
         return hashlib.sha256(block_string).hexdigest()
 
 ###############################################
-# Clase para la blockchain (con funcionalidad P2P)
+# Clase para la blockchain
 ###############################################
 class Blockchain:
     def __init__(self):
-        # 1) Cargo la cadena y los balances de la BD
         self.chain = self.load_chain_from_db()
         self.balances = self.load_balances_from_db()
         self.pending_transactions = []
         self.peers = []
         self.commissions_collected = 0
 
-        # 2) Si no hay bloques, creo el génesis y asigno los tokens
         if not self.chain:
             self.owner_private_key, self.owner_public_key = self.create_genesis_block()
         else:
-            # Opcional: si quieres imprimir la dirección propietaria al reiniciar:
             print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
 
+    def load_chain_from_db(self):
+        """Carga la cadena de bloques desde la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM blockchain ORDER BY index")
+                chain = [json.loads(row[0]) for row in cur.fetchall()]
+                return [Block(b["index"], [Transaction(**t) for t in b["transactions"]],
+                              b["timestamp"], b["previous_hash"], b["nonce"]) for b in chain]
+        except Exception as e:
+            logging.error(f"Error cargando cadena desde DB: {e}")
+            return []
+        finally:
+            db_pool.putconn(conn)
+
+    def load_balances_from_db(self):
+        """Carga los saldos desde la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT address, balance FROM balances")
+                return {row[0]: row[1] for row in cur.fetchall()}
+        except Exception as e:
+            logging.error(f"Error cargando saldos desde DB: {e}")
+            return {}
+        finally:
+            db_pool.putconn(conn)
 
     def create_genesis_block(self):
+        """Crea el bloque génesis y genera las claves del propietario."""
         private_key, public_key = generate_key_pair()
-        # Se crea el bloque génesis sin asignar tokens (0 tokens en la transacción génesis)
         genesis_tx = Transaction("genesis", public_key, 0, time.time(), {"ico": False})
         genesis_block = Block(0, [genesis_tx], time.time(), "0")
         self.chain.append(genesis_block)
-        # Establece el balance inicial en 0 para el propietario
         self.balances[public_key] = 0
-        # Imprimir claves del propietario para referencia (en producción, la clave privada debe mantenerse en secreto)
-        print("Clave privada del propietario:", private_key)
-        print("Clave pública del propietario:", public_key)
+        logging.info(f"Clave privada del propietario: {private_key}")
+        logging.info(f"Clave pública del propietario: {public_key}")
         return private_key, public_key
 
-    def get_block_reward(self, index):
-        halvings = index // 210000
-        if halvings >= 64:
-            return 0
-        return BLOCK_REWARD_INITIAL // (2 ** halvings)
+    def proof_of_work(self, block, difficulty=4):
+        """Implementa la prueba de trabajo (PoW)."""
+        target = '0' * difficulty
+        while block.hash[:difficulty] != target:
+            block.nonce += 1
+            block.hash = block.calculate_hash()
+        return block
 
-    def add_block(self, block, nn_model=None):
+    def add_block(self, block):
+        """Añade un bloque a la cadena después de validarlo."""
         if self.validate_block(block):
             self.chain.append(block)
             for tx in block.transactions:
@@ -274,6 +288,7 @@ class Blockchain:
         return False
 
     def validate_block(self, block):
+        """Valida un bloque antes de añadirlo."""
         reward_tx_count = sum(1 for tx in block.transactions if tx.from_address == "system")
         if reward_tx_count > 1:
             return False
@@ -291,7 +306,15 @@ class Blockchain:
                 return False
         return True
 
+    def get_block_reward(self, index):
+        """Calcula la recompensa por bloque."""
+        halvings = index // 210000
+        if halvings >= 64:
+            return 0
+        return BLOCK_REWARD_INITIAL // (2 ** halvings)
+
     def verify_zk_proof(self, tx):
+        """Verifica la prueba de conocimiento cero."""
         try:
             proof_data = json.dumps({"proof": tx.zk_proof, "tx": tx.to_dict()})
             result = subprocess.run(['./zk_proof_verifier', proof_data], capture_output=True, text=True, timeout=5)
@@ -300,21 +323,8 @@ class Blockchain:
             logging.error(f"Error verificando zk-proof: {e}")
             return True  # Simulado
 
-    def load_chain_from_db(self):
-        conn = db_pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT data FROM blockchain ORDER BY index")
-                chain = [json.loads(row[0]) for row in cur.fetchall()]
-                return [Block(b["index"], [Transaction(**t) for t in b["transactions"]],
-                              b["timestamp"], b["previous_hash"], b["nonce"]) for b in chain]
-        except Exception as e:
-            logging.error(f"Error cargando cadena desde DB: {e}")
-            return []
-        finally:
-            db_pool.putconn(conn)
-
     def save_chain_to_db(self):
+        """Guarda la cadena en la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -329,19 +339,8 @@ class Blockchain:
         finally:
             db_pool.putconn(conn)
 
-    def load_balances_from_db(self):
-        conn = db_pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT address, balance FROM balances")
-                return {row[0]: row[1] for row in cur.fetchall()}
-        except Exception as e:
-            logging.error(f"Error cargando saldos desde DB: {e}")
-            return {}
-        finally:
-            db_pool.putconn(conn)
-
     def save_balances_to_db(self):
+        """Guarda los saldos en la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -357,6 +356,7 @@ class Blockchain:
             db_pool.putconn(conn)
 
     def broadcast_block(self, block):
+        """Difunde el bloque a los peers."""
         for peer in self.peers:
             try:
                 url = f"{peer}/propose_block"
@@ -371,29 +371,25 @@ class Blockchain:
                 })
                 response = requests.post(url, headers=headers, data=data, timeout=5)
                 if response.status_code == 201:
-                    logging.info(f"Bloque difundido exitosamente a {peer}")
+                    logging.info(f"Bloque difundido a {peer}")
                 else:
                     logging.error(f"Error difundiendo bloque a {peer}: {response.text}")
             except Exception as e:
                 logging.error(f"Excepción al difundir bloque a {peer}: {e}")
 
     def add_peer(self, peer_url):
+        """Añade un nuevo peer."""
         if peer_url not in self.peers:
             self.peers.append(peer_url)
             logging.info(f"Nuevo peer agregado: {peer_url}")
 
     def get_peers(self):
+        """Retorna la lista de peers."""
         return self.peers
 
 ###############################################
-# Fin del módulo blockchain_core
+# Servidor HTTP para la blockchain
 ###############################################
-
-###############################################
-# Servidor HTTP para interactuar con la blockchain
-###############################################
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def _set_headers(self, code=200):
         self.send_response(code)
@@ -472,7 +468,10 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
 def run_server(server_class=HTTPServer, handler_class=BlockchainHTTPRequestHandler, port=5000):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
-    logging.info(f"Starting blockchain server on port {port}...")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile="server.crt", keyfile="server.key")
+    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    logging.info(f"Starting blockchain server on port {port} with HTTPS...")
     httpd.serve_forever()
 
 ###############################################
@@ -481,7 +480,7 @@ def run_server(server_class=HTTPServer, handler_class=BlockchainHTTPRequestHandl
 if __name__ == "__main__":
     # Iniciar la blockchain
     blockchain = Blockchain()
-    # Iniciar el servidor HTTP en un hilo (API pública)
+    # Iniciar el servidor HTTP en un hilo
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     
