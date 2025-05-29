@@ -24,6 +24,9 @@ import time
 import threading
 import logging
 from datetime import datetime
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+
 
 # Deshabilitar la GPU para evitar errores de CUDA
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -44,7 +47,7 @@ logging.basicConfig(
 # Parámetros de la blockchain e ICO
 TOKEN_NAME = "5470"
 TOKEN_SYMBOL = "547"
-TOKEN_SUPPLY = 5470000       # Oferta total (se minará gradualmente)
+TOKEN_SUPPLY = 21000000       # Oferta total (se minará gradualmente)
 BLOCK_TIME = 10              # Tiempo entre bloques en segundos
 NUM_NODES = 5                # Número de nodos en la red (simulado)
 DB_URL = os.getenv('DATABASE_URL', 'dbname=blockchain user=postgres password=YOUR_DB_PASSWORD host=localhost')
@@ -72,8 +75,6 @@ cipher = Fernet(FERNET_KEY)
 ###############################################
 # Función para generar par de claves (RSA ejemplo)
 ###############################################
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
 
 def generate_key_pair():
     """
