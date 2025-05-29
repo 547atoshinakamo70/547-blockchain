@@ -20,6 +20,10 @@ import numpy as np
 from dotenv import load_dotenv
 import requests
 import ssl
+import time
+import threading
+import logging
+from datetime import datetime
 
 # Deshabilitar la GPU para evitar errores de CUDA
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -484,6 +488,48 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     
-    logging.info("Blockchain operativa. Ejecutando ciclo principal...")
+    logging.info("Blockchain operativa. Iniciando ciclo de minado...")
+    
     while True:
-        time.sleep(60)
+        # Obtener el último bloque de la cadena
+        previous_block = blockchain.chain[-1]
+        
+        # Crear índice y timestamp para el nuevo bloque
+        new_index = previous_block.index + 1
+        new_timestamp = time.time()
+        
+        # Crear siempre la transacción de recompensa
+        reward_tx = Transaction(
+            from_address="system",
+            to_address=blockchain.owner_public_key,
+            amount=blockchain.get_block_reward(new_index),
+            timestamp=new_timestamp,
+            metadata={"type": "mining_reward"}
+        )
+        
+        # Iniciar la lista de transacciones con la recompensa
+        transactions = [reward_tx]
+        
+        # Si hay transacciones pendientes, incluirlas y limpiar la lista
+        if blockchain.pending_transactions:
+            transactions.extend(blockchain.pending_transactions)
+            blockchain.pending_transactions = []
+        
+        # Crear el nuevo bloque con las transacciones (al menos la recompensa)
+        new_block = Block(new_index, transactions, new_timestamp, previous_block.hash)
+        
+        # Intentar añadir el bloque a la cadena
+        if blockchain.add_block(new_block, nn_model=nn_model):
+            # Calcular el número de transacciones de usuarios (sin la recompensa)
+            num_user_txs = len(new_block.transactions) - 1
+            # Mostrar detalles del bloque
+            logging.info(
+                f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
+                f"Índice={new_block.index}, Hash={new_block.hash}, "
+                f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
+            )
+        else:
+            logging.warning(f"No se pudo añadir el bloque {new_index}.")
+        
+        # Esperar al siguiente intervalo de bloque
+        time.sleep(BLOCK_TIME)  # Por ejemplo, BLOCK_TIME = 10 segundos
