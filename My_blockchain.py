@@ -212,12 +212,25 @@ class Block:
 ###############################################
 class Blockchain:
     def __init__(self):
-        # Asegúrate de que self.chain siempre sea una lista
-        self.chain = self.load_chain_from_db() or []
+        self.chain = self.load_chain_from_db()
         self.balances = self.load_balances_from_db()
         self.pending_transactions = []
         self.peers = []
         self.commissions_collected = 0
+
+        # Si no hay bloques, crea el génesis y asigna los tokens
+        if not self.chain:
+            self.owner_private_key, self.owner_public_key = self.create_genesis_block()
+        else:
+            # Opcional: imprime la dirección del propietario si ya está definida
+            print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
+
+    def get_block_reward(self, index):
+        """
+        Calcula la recompensa por minar un bloque basado en su índice.
+        Retorna una recompensa fija de 50 tokens (puedes ajustar esto según tus necesidades).
+        """
+        return 50
 
         # Si no hay bloques, crea el génesis y asigna los tokens
         if not self.chain:
