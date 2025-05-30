@@ -611,10 +611,10 @@ if __name__ == "__main__":
             num_user_txs = len(new_block.transactions) - 1
             # Mostrar detalles del bloque
             logging.info(
-                f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
-                f"Índice={new_block.index}, Hash={new_block.hash}, "
-                f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
-            )
+    f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
+    f"Índice={new_block.index}, Hash={new_block.hash}, "
+    f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
+)
         else:
             logging.warning(f"No se pudo añadir el bloque {new_index}.")
         
