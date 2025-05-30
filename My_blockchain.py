@@ -577,7 +577,8 @@ if __name__ == "__main__":
     
     logging.info("Blockchain operativa. Iniciando ciclo de minado...")
     
-    while True:
+while True:
+    try:
         # Obtener el último bloque de la cadena
         previous_block = blockchain.chain[-1]
         
@@ -585,7 +586,13 @@ if __name__ == "__main__":
         new_index = previous_block.index + 1
         new_timestamp = time.time()
         
-        # Crear siempre la transacción de recompensa
+        # Validar clave pública del propietario antes de crear la transacción
+        if not blockchain.owner_public_key:
+            logging.error("Clave pública del propietario no definida.")
+            time.sleep(BLOCK_TIME)
+            continue
+        
+        # Crear la transacción de recompensa
         reward_tx = Transaction(
             from_address="system",
             to_address=blockchain.owner_public_key,
@@ -597,26 +604,30 @@ if __name__ == "__main__":
         # Iniciar la lista de transacciones con la recompensa
         transactions = [reward_tx]
         
-        # Si hay transacciones pendientes, incluirlas y limpiar la lista
+        # Incluir transacciones pendientes, si las hay, y limpiar la lista
         if blockchain.pending_transactions:
             transactions.extend(blockchain.pending_transactions)
-            blockchain.pending_transactions = []
+            blockchain.pending_transactions.clear()  # Más eficiente que asignar []
         
-        # Crear el nuevo bloque con las transacciones (al menos la recompensa)
+        # Crear el nuevo bloque
         new_block = Block(new_index, transactions, new_timestamp, previous_block.hash)
         
         # Intentar añadir el bloque a la cadena
         if blockchain.add_block(new_block, nn_model=nn_model):
             # Calcular el número de transacciones de usuarios (sin la recompensa)
             num_user_txs = len(new_block.transactions) - 1
-            # Mostrar detalles del bloque
+            # Registrar detalles del bloque minado
             logging.info(
-    f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
-    f"Índice={new_block.index}, Hash={new_block.hash}, "
-    f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
-)
+                f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
+                f"Índice={new_block.index}, Hash={new_block.hash}, "
+                f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
+            )
         else:
             logging.warning(f"No se pudo añadir el bloque {new_index}.")
         
         # Esperar al siguiente intervalo de bloque
-        time.sleep(BLOCK_TIME)  # Por ejemplo, BLOCK_TIME = 10 segundos
+        time.sleep(BLOCK_TIME)
+    
+    except Exception as e:
+        logging.error(f"Error en el ciclo de minado: {e}")
+        time.sleep(BLOCK_TIME)  # Continuar tras un error
