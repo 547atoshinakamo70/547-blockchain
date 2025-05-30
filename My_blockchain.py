@@ -299,26 +299,26 @@ class Blockchain:
         return False
 
     def validate_block(self, block):
-    reward_tx_count = sum(1 for tx in block.transactions if tx.from_address == "system")
-    if reward_tx_count > 1:
-        return False
-    if reward_tx_count == 1:
-        reward_tx = next(tx for tx in block.transactions if tx.from_address == "system")
-        expected_reward = self.get_block_reward(block.index)
-        if reward_tx.amount != expected_reward or reward_tx.signature is not None or reward_tx.zk_proof is not None:
+        reward_tx_count = sum(1 for tx in block.transactions if tx.from_address == "system")
+        if reward_tx_count > 1:
             return False
-    for tx in block.transactions:
-        if tx.from_address not in ["system", "genesis"]:
-            commission = int(tx.amount * COMMISSION_RATE)
-            # Validación con el modelo de IA
-            if not validate_with_hidden_model(nn_model, tx):
-                logging.warning(f"Transacción rechazada por IA: {tx.to_dict()}")
+        if reward_tx_count == 1:
+            reward_tx = next(tx for tx in block.transactions if tx.from_address == "system")
+            expected_reward = self.get_block_reward(block.index)
+            if reward_tx.amount != expected_reward or reward_tx.signature is not None or reward_tx.zk_proof is not None:
                 return False
-            if not self.verify_zk_proof(tx) or not tx.verify_signature() or self.balances.get(tx.from_address, 0) < (tx.amount + commission):
+        for tx in block.transactions:
+            if tx.from_address not in ["system", "genesis"]:
+                commission = int(tx.amount * COMMISSION_RATE)
+                # Validación con el modelo de IA
+                if not validate_with_hidden_model(nn_model, tx):
+                    logging.warning(f"Transacción rechazada por IA: {tx.to_dict()}")
+                    return False
+                if not self.verify_zk_proof(tx) or not tx.verify_signature() or self.balances.get(tx.from_address, 0) < (tx.amount + commission):
+                    return False
+            elif tx.from_address == "genesis" and not self.verify_zk_proof(tx):
                 return False
-        elif tx.from_address == "genesis" and not self.verify_zk_proof(tx):
-            return False
-    return True
+        return True
 
     def get_block_reward(self, index):
         halvings = index // 210000
