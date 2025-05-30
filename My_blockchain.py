@@ -26,6 +26,12 @@ import logging
 from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+import json
+import logging
+import subprocess
+from ecdsa import SigningKey, VerifyingKey, SECP256k1
+from cryptography.fernet import Fernet
+from datetime import datetime
 
 
 # Deshabilitar la GPU para evitar errores de CUDA
@@ -143,16 +149,28 @@ def validate_with_hidden_model(model, transaction):
 # Clase para representar una transacción
 ###############################################
 class Transaction:
-    def __init__(self, from_address, to_address, amount, timestamp, metadata=None):
+    def __init__(self, from_address, to_address, amount, timestamp=None, metadata=None):
+        """
+        Inicializa una transacción con los parámetros dados.
+        :param from_address: Dirección del remitente.
+        :param to_address: Dirección del destinatario.
+        :param amount: Cantidad a transferir.
+        :param timestamp: Marca de tiempo de la transacción (opcional, por defecto es ahora).
+        :param metadata: Datos adicionales de la transacción (opcional).
+        """
         self.from_address = from_address
         self.to_address = to_address
         self.amount = amount
-        self.timestamp = timestamp
+        self.timestamp = timestamp if timestamp else datetime.now().isoformat()
         self.metadata = metadata or {}
         self.signature = None
         self.zk_proof = None
 
     def to_dict(self):
+        """
+        Convierte la transacción a un diccionario, cifrando los metadatos.
+        :return: Diccionario con los datos de la transacción.
+        """
         encrypted_metadata = cipher.encrypt(json.dumps(self.metadata).encode()).decode()
         return {
             "from": self.from_address,
@@ -165,48 +183,101 @@ class Transaction:
         }
 
     def sign(self, private_key):
-        tx_data = f"{self.from_address}{self.to_address}{self.amount}{self.timestamp}{json.dumps(self.metadata)}"
+        """
+        Firma la transacción usando la clave privada proporcionada.
+        :param private_key: Clave privada en formato hexadecimal.
+        """
+        tx_data = self._get_tx_data()
         sk = SigningKey.from_string(bytes.fromhex(private_key), curve=SECP256k1)
         self.signature = sk.sign(tx_data.encode()).hex()
 
     def generate_zk_proof(self):
+        """
+        Genera una prueba de conocimiento cero para la transacción.
+        """
         try:
             tx_data = json.dumps(self.to_dict())
             result = subprocess.run(['./zk_proof_verifier', tx_data], capture_output=True, text=True, timeout=5)
             self.zk_proof = result.stdout.strip()
+        except subprocess.TimeoutExpired:
+            logging.error("Timeout generando zk-proof")
+            self.zk_proof = "timeout_error"
         except Exception as e:
             logging.error(f"Error generando zk-proof: {e}")
             self.zk_proof = "simulated_proof"
 
     def verify_signature(self):
-        tx_data = f"{self.from_address}{self.to_address}{self.amount}{self.timestamp}{json.dumps(self.metadata)}"
+        """
+        Verifica la firma de la transacción.
+        :return: True si la firma es válida, False en caso contrario.
+        """
+        if not self.signature:
+            return False
+        tx_data = self._get_tx_data()
         vk = VerifyingKey.from_string(bytes.fromhex(self.from_address), curve=SECP256k1)
         try:
             return vk.verify(bytes.fromhex(self.signature), tx_data.encode())
         except Exception:
             return False
 
+    def _get_tx_data(self):
+        """
+        Método privado para obtener los datos de la transacción en formato string.
+        :return: String con los datos de la transacción.
+        """
+        return f"{self.from_address}{self.to_address}{self.amount}{self.timestamp}{json.dumps(self.metadata)}"
+
 ###############################################
 # Clase para representar un bloque
 ###############################################
 class Block:
-    def __init__(self, index, transactions, timestamp, previous_hash, nonce=0):
+    def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0):
+        """
+        Inicializa un bloque con los parámetros dados.
+        
+        :param index: Índice del bloque en la cadena (entero).
+        :param transactions: Lista de transacciones incluidas en el bloque.
+        :param previous_hash: Hash del bloque anterior (cadena).
+        :param timestamp: Marca de tiempo del bloque (opcional, por defecto actual).
+        :param nonce: Valor para la prueba de trabajo (PoW, por defecto 0).
+        """
         self.index = index
         self.transactions = transactions
-        self.timestamp = timestamp
         self.previous_hash = previous_hash
+        self.timestamp = timestamp if timestamp else datetime.now().isoformat()
         self.nonce = nonce
         self.hash = self.calculate_hash()
 
     def calculate_hash(self):
-        block_string = json.dumps({
+        """
+        Calcula el hash SHA-256 del bloque basado en sus atributos.
+        
+        :return: Hash del bloque como una cadena hexadecimal.
+        """
+        block_data = {
             "index": self.index,
             "transactions": [t.to_dict() for t in self.transactions],
             "timestamp": self.timestamp,
             "previous_hash": self.previous_hash,
             "nonce": self.nonce
-        }, sort_keys=True).encode()
+        }
+        block_string = json.dumps(block_data, sort_keys=True).encode()
         return hashlib.sha256(block_string).hexdigest()
+
+    def to_dict(self):
+        """
+        Convierte el bloque a un diccionario para serialización.
+        
+        :return: Diccionario con los datos del bloque.
+        """
+        return {
+            "index": self.index,
+            "transactions": [t.to_dict() for t in self.transactions],
+            "timestamp": self.timestamp,
+            "previous_hash": self.previous_hash,
+            "nonce": self.nonce,
+            "hash": self.hash
+        }
 
 ###############################################
 # Clase para la blockchain
