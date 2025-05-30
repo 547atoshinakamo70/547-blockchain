@@ -617,11 +617,12 @@ while True:
             # Calcular el número de transacciones de usuarios (sin la recompensa)
             num_user_txs = len(new_block.transactions) - 1
             # Registrar detalles del bloque minado
+            timestamp_num = float(new_block.timestamp)  # Convertir la cadena a float
+            formatted_time = datetime.fromtimestamp(timestamp_num).strftime('%Y-%m-%d %H:%M:%S')
             logging.info(
-                f"Bloque minado en {datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')}: "
-                f"Índice={new_block.index}, Hash={new_block.hash}, "
-                f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
-            )
+                f"Bloque minado en {formatted_time}: "
+                f"Índice={new_block.index}, Hash={new_block.hash}"
+           )
         else:
             logging.warning(f"No se pudo añadir el bloque {new_index}.")
         
