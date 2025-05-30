@@ -249,6 +249,7 @@ class Blockchain:
             return []  # Si falla, devolvemos una lista vacía, pero esto se puede mejorar
         finally:
             db_pool.putconn(conn)
+            
     def load_balances_from_db(self):
         conn = db_pool.getconn()
         try:
