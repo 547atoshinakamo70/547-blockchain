@@ -7,32 +7,20 @@ import json
 import subprocess
 import threading
 import os
-import random
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from ecdsa import SigningKey, VerifyingKey, SECP256k1
 from cryptography.fernet import Fernet
 import psycopg2
 from psycopg2 import pool
-import pika
 import tensorflow as tf
-from tensorflow.keras import layers, models
+from tensorflow.keras import layers
 import numpy as np
 from dotenv import load_dotenv
 import requests
 import ssl
-import time
-import threading
-import logging
 from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
-import json
-import logging
-import subprocess
-from ecdsa import SigningKey, VerifyingKey, SECP256k1
-from cryptography.fernet import Fernet
-from datetime import datetime
-
 
 # Deshabilitar la GPU para evitar errores de CUDA
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -57,7 +45,6 @@ TOKEN_SUPPLY = 21000000       # Oferta total (se minará gradualmente)
 BLOCK_TIME = 10              # Tiempo entre bloques en segundos
 NUM_NODES = 5                # Número de nodos en la red (simulado)
 DB_URL = os.getenv('DATABASE_URL', 'dbname=blockchain user=postgres password=YOUR_DB_PASSWORD host=localhost')
-KYC_API_URL = os.getenv('KYC_API_URL', 'https://YOUR_KYC_API_URL/verify')
 BLOCK_REWARD_INITIAL = 50    # Recompensa inicial por bloque
 COMMISSION_RATE = 0.002      # 0.2% de comisión por transacción
 
@@ -79,9 +66,8 @@ FERNET_KEY = os.getenv('FERNET_KEY', Fernet.generate_key().decode()).encode()
 cipher = Fernet(FERNET_KEY)
 
 ###############################################
-# Función para generar par de claves (RSA ejemplo)
+# Función para generar par de claves (RSA)
 ###############################################
-
 def generate_key_pair():
     """
     Genera un par de claves utilizando RSA.
@@ -140,7 +126,7 @@ def validate_with_hidden_model(model, transaction):
 
     feature3 = float(transaction.amount)
     feature4 = float(transaction.timestamp)
-    
+
     input_data = np.array([[feature1, feature2, feature3, feature4]])
     prediction = model.predict(input_data, verbose=0)
     return prediction[0][0] > 0.5
@@ -150,27 +136,15 @@ def validate_with_hidden_model(model, transaction):
 ###############################################
 class Transaction:
     def __init__(self, from_address, to_address, amount, timestamp=None, metadata=None):
-        """
-        Inicializa una transacción con los parámetros dados.
-        :param from_address: Dirección del remitente.
-        :param to_address: Dirección del destinatario.
-        :param amount: Cantidad a transferir.
-        :param timestamp: Marca de tiempo de la transacción (opcional, por defecto es ahora).
-        :param metadata: Datos adicionales de la transacción (opcional).
-        """
         self.from_address = from_address
         self.to_address = to_address
         self.amount = amount
-        self.timestamp = timestamp if timestamp else datetime.now().isoformat()
+        self.timestamp = timestamp if timestamp else datetime.now().timestamp()
         self.metadata = metadata or {}
         self.signature = None
         self.zk_proof = None
 
     def to_dict(self):
-        """
-        Convierte la transacción a un diccionario, cifrando los metadatos.
-        :return: Diccionario con los datos de la transacción.
-        """
         encrypted_metadata = cipher.encrypt(json.dumps(self.metadata).encode()).decode()
         return {
             "from": self.from_address,
@@ -183,18 +157,11 @@ class Transaction:
         }
 
     def sign(self, private_key):
-        """
-        Firma la transacción usando la clave privada proporcionada.
-        :param private_key: Clave privada en formato hexadecimal.
-        """
         tx_data = self._get_tx_data()
         sk = SigningKey.from_string(bytes.fromhex(private_key), curve=SECP256k1)
         self.signature = sk.sign(tx_data.encode()).hex()
 
     def generate_zk_proof(self):
-        """
-        Genera una prueba de conocimiento cero para la transacción.
-        """
         try:
             tx_data = json.dumps(self.to_dict())
             result = subprocess.run(['./zk_proof_verifier', tx_data], capture_output=True, text=True, timeout=5)
@@ -207,10 +174,6 @@ class Transaction:
             self.zk_proof = "simulated_proof"
 
     def verify_signature(self):
-        """
-        Verifica la firma de la transacción.
-        :return: True si la firma es válida, False en caso contrario.
-        """
         if not self.signature:
             return False
         tx_data = self._get_tx_data()
@@ -221,10 +184,6 @@ class Transaction:
             return False
 
     def _get_tx_data(self):
-        """
-        Método privado para obtener los datos de la transacción en formato string.
-        :return: String con los datos de la transacción.
-        """
         return f"{self.from_address}{self.to_address}{self.amount}{self.timestamp}{json.dumps(self.metadata)}"
 
 ###############################################
@@ -232,28 +191,14 @@ class Transaction:
 ###############################################
 class Block:
     def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0):
-        """
-        Inicializa un bloque con los parámetros dados.
-        
-        :param index: Índice del bloque en la cadena (entero).
-        :param transactions: Lista de transacciones incluidas en el bloque.
-        :param previous_hash: Hash del bloque anterior (cadena).
-        :param timestamp: Marca de tiempo del bloque (opcional, por defecto actual).
-        :param nonce: Valor para la prueba de trabajo (PoW, por defecto 0).
-        """
         self.index = index
         self.transactions = transactions
         self.previous_hash = previous_hash
-        self.timestamp = timestamp if timestamp else datetime.now().isoformat()
+        self.timestamp = timestamp if timestamp else time.time()
         self.nonce = nonce
         self.hash = self.calculate_hash()
 
     def calculate_hash(self):
-        """
-        Calcula el hash SHA-256 del bloque basado en sus atributos.
-        
-        :return: Hash del bloque como una cadena hexadecimal.
-        """
         block_data = {
             "index": self.index,
             "transactions": [t.to_dict() for t in self.transactions],
@@ -265,11 +210,6 @@ class Block:
         return hashlib.sha256(block_string).hexdigest()
 
     def to_dict(self):
-        """
-        Convierte el bloque a un diccionario para serialización.
-        
-        :return: Diccionario con los datos del bloque.
-        """
         return {
             "index": self.index,
             "transactions": [t.to_dict() for t in self.transactions],
@@ -290,35 +230,19 @@ class Blockchain:
         self.peers = []
         self.commissions_collected = 0
 
-        # Si no hay bloques, crea el génesis y asigna los tokens
-        if not self.chain:
-            self.owner_private_key, self.owner_public_key = self.create_genesis_block()
-        else:
-            # Opcional: imprime la dirección del propietario si ya está definida
-            print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
-
-    def get_block_reward(self, index):
-        """
-        Calcula la recompensa por minar un bloque basado en su índice.
-        Retorna una recompensa fija de 50 tokens (puedes ajustar esto según tus necesidades).
-        """
-        return 50
-
-        # Si no hay bloques, crea el génesis y asigna los tokens
         if not self.chain:
             self.owner_private_key, self.owner_public_key = self.create_genesis_block()
         else:
             print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
 
     def load_chain_from_db(self):
-        """Carga la cadena de bloques desde la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT data FROM blockchain ORDER BY index")
                 chain = [json.loads(row[0]) for row in cur.fetchall()]
                 return [Block(b["index"], [Transaction(**t) for t in b["transactions"]],
-                              b["timestamp"], b["previous_hash"], b["nonce"]) for b in chain]
+                              b["previous_hash"], b["timestamp"], b["nonce"]) for b in chain]
         except Exception as e:
             logging.error(f"Error cargando cadena desde DB: {e}")
             return []
@@ -326,23 +250,21 @@ class Blockchain:
             db_pool.putconn(conn)
 
     def load_balances_from_db(self):
-        """Carga los saldos desde la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT address, balance FROM balances")
                 return {row[0]: row[1] for row in cur.fetchall()}
         except Exception as e:
-            logging.error(f"Error cargando saldos desde DB: {e}")
+            logging.errorgraphics(f"Error cargando saldos desde DB: {e}")
             return {}
         finally:
             db_pool.putconn(conn)
 
     def create_genesis_block(self):
-        """Crea el bloque génesis y genera las claves del propietario."""
         private_key, public_key = generate_key_pair()
         genesis_tx = Transaction("genesis", public_key, 0, time.time(), {"ico": False})
-        genesis_block = Block(0, [genesis_tx], time.time(), "0")
+        genesis_block = Block(0, [genesis_tx], "0")
         self.chain.append(genesis_block)
         self.balances[public_key] = 0
         logging.info(f"Clave privada del propietario: {private_key}")
@@ -350,7 +272,6 @@ class Blockchain:
         return private_key, public_key
 
     def proof_of_work(self, block, difficulty=4):
-        """Implementa la prueba de trabajo (PoW)."""
         target = '0' * difficulty
         while block.hash[:difficulty] != target:
             block.nonce += 1
@@ -358,7 +279,6 @@ class Blockchain:
         return block
 
     def add_block(self, block):
-        """Añade un bloque a la cadena después de validarlo."""
         if self.validate_block(block):
             self.chain.append(block)
             for tx in block.transactions:
@@ -379,7 +299,6 @@ class Blockchain:
         return False
 
     def validate_block(self, block):
-        """Valida un bloque antes de añadirlo."""
         reward_tx_count = sum(1 for tx in block.transactions if tx.from_address == "system")
         if reward_tx_count > 1:
             return False
@@ -398,14 +317,12 @@ class Blockchain:
         return True
 
     def get_block_reward(self, index):
-        """Calcula la recompensa por bloque."""
         halvings = index // 210000
         if halvings >= 64:
             return 0
         return BLOCK_REWARD_INITIAL // (2 ** halvings)
 
     def verify_zk_proof(self, tx):
-        """Verifica la prueba de conocimiento cero."""
         try:
             proof_data = json.dumps({"proof": tx.zk_proof, "tx": tx.to_dict()})
             result = subprocess.run(['./zk_proof_verifier', proof_data], capture_output=True, text=True, timeout=5)
@@ -415,14 +332,13 @@ class Blockchain:
             return True  # Simulado
 
     def save_chain_to_db(self):
-        """Guarda la cadena en la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 for block in self.chain:
                     cur.execute(
                         "INSERT INTO blockchain (index, data) VALUES (%s, %s) ON CONFLICT (index) DO UPDATE SET data = %s",
-                        (block.index, json.dumps(block.__dict__), json.dumps(block.__dict__))
+                        (block.index, json.dumps(block.to_dict()), json.dumps(block.to_dict()))
                     )
                 conn.commit()
         except Exception as e:
@@ -431,7 +347,6 @@ class Blockchain:
             db_pool.putconn(conn)
 
     def save_balances_to_db(self):
-        """Guarda los saldos en la base de datos."""
         conn = db_pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -447,19 +362,11 @@ class Blockchain:
             db_pool.putconn(conn)
 
     def broadcast_block(self, block):
-        """Difunde el bloque a los peers."""
         for peer in self.peers:
             try:
                 url = f"{peer}/propose_block"
                 headers = {'Content-Type': 'application/json'}
-                data = json.dumps({
-                    "index": block.index,
-                    "transactions": [tx.to_dict() for tx in block.transactions],
-                    "timestamp": block.timestamp,
-                    "previous_hash": block.previous_hash,
-                    "nonce": block.nonce,
-                    "hash": block.hash
-                })
+                data = json.dumps(block.to_dict())
                 response = requests.post(url, headers=headers, data=data, timeout=5)
                 if response.status_code == 201:
                     logging.info(f"Bloque difundido a {peer}")
@@ -469,13 +376,11 @@ class Blockchain:
                 logging.error(f"Excepción al difundir bloque a {peer}: {e}")
 
     def add_peer(self, peer_url):
-        """Añade un nuevo peer."""
         if peer_url not in self.peers:
             self.peers.append(peer_url)
             logging.info(f"Nuevo peer agregado: {peer_url}")
 
     def get_peers(self):
-        """Retorna la lista de peers."""
         return self.peers
 
 ###############################################
@@ -489,7 +394,7 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/chain":
-            chain_data = [block.__dict__ for block in blockchain.chain]
+            chain_data = [block.to_dict() for block in blockchain.chain]
             self._set_headers()
             self.wfile.write(json.dumps({"chain": chain_data}).encode())
         elif self.path == "/pending_transactions":
@@ -521,11 +426,11 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
             try:
                 block_data = json.loads(post_data)
                 block = Block(
-                    index=block_data["index"],
-                    transactions=[Transaction(**tx) for tx in block_data["transactions"]],
-                    timestamp=block_data["timestamp"],
-                    previous_hash=block_data["previous_hash"],
-                    nonce=block_data["nonce"]
+                    block_data["index"],
+                    [Transaction(**tx) for tx in block_data["transactions"]],
+                    block_data["previous_hash"],
+                    block_data["timestamp"],
+                    block_data["nonce"]
                 )
                 if blockchain.add_block(block):
                     self._set_headers(201)
@@ -569,66 +474,52 @@ def run_server(server_class=HTTPServer, handler_class=BlockchainHTTPRequestHandl
 # Ejecución principal
 ###############################################
 if __name__ == "__main__":
-    # Iniciar la blockchain
     blockchain = Blockchain()
-    # Iniciar el servidor HTTP en un hilo
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
-    
+
     logging.info("Blockchain operativa. Iniciando ciclo de minado...")
-    
-while True:
-    try:
-        # Obtener el último bloque de la cadena
-        previous_block = blockchain.chain[-1]
-        
-        # Crear índice y timestamp para el nuevo bloque
-        new_index = previous_block.index + 1
-        new_timestamp = time.time()
-        
-        # Validar clave pública del propietario antes de crear la transacción
-        if not blockchain.owner_public_key:
-            logging.error("Clave pública del propietario no definida.")
+
+    while True:
+        try:
+            previous_block = blockchain.chain[-1]
+            new_index = previous_block.index + 1
+            new_timestamp = time.time()
+
+            if not blockchain.owner_public_key:
+                logging.error("Clave pública del propietario no definida.")
+                time.sleep(BLOCK_TIME)
+                continue
+
+            reward_tx = Transaction(
+                from_address="system",
+                to_address=blockchain.owner_public_key,
+                amount=blockchain.get_block_reward(new_index),
+                timestamp=new_timestamp,
+                metadata={"type": "mining_reward"}
+            )
+
+            transactions = [reward_tx]
+            if blockchain.pending_transactions:
+                transactions.extend(blockchain.pending_transactions)
+                blockchain.pending_transactions.clear()
+
+            new_block = Block(new_index, transactions, previous_block.hash, new_timestamp)
+            new_block = blockchain.proof_of_work(new_block)  # Aplicar PoW
+
+            if blockchain.add_block(new_block):
+                num_user_txs = len(new_block.transactions) - 1
+                formatted_time = datetime.fromtimestamp(new_block.timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                logging.info(
+                    f"Bloque minado en {formatted_time}: "
+                    f"Índice={new_block.index}, Hash={new_block.hash}, "
+                    f"Transacciones de Usuarios={num_user_txs}, Recompensa={reward_tx.amount} {TOKEN_SYMBOL}"
+                )
+            else:
+                logging.warning(f"No se pudo añadir el bloque {new_index}.")
+
             time.sleep(BLOCK_TIME)
-            continue
-        
-        # Crear la transacción de recompensa
-        reward_tx = Transaction(
-            from_address="system",
-            to_address=blockchain.owner_public_key,
-            amount=blockchain.get_block_reward(new_index),
-            timestamp=new_timestamp,
-            metadata={"type": "mining_reward"}
-        )
-        
-        # Iniciar la lista de transacciones con la recompensa
-        transactions = [reward_tx]
-        
-        # Incluir transacciones pendientes, si las hay, y limpiar la lista
-        if blockchain.pending_transactions:
-            transactions.extend(blockchain.pending_transactions)
-            blockchain.pending_transactions.clear()  # Más eficiente que asignar []
-        
-        # Crear el nuevo bloque
-        new_block = Block(new_index, transactions, new_timestamp, previous_block.hash)
-        
-        # Intentar añadir el bloque a la cadena
-        if blockchain.add_block(new_block, nn_model=nn_model):
-            # Calcular el número de transacciones de usuarios (sin la recompensa)
-            num_user_txs = len(new_block.transactions) - 1
-            # Registrar detalles del bloque minado
-            timestamp_num = float(new_block.timestamp)  # Convertir la cadena a float
-            formatted_time = datetime.fromtimestamp(timestamp_num).strftime('%Y-%m-%d %H:%M:%S')
-            logging.info(
-                f"Bloque minado en {formatted_time}: "
-                f"Índice={new_block.index}, Hash={new_block.hash}"
-           )
-        else:
-            logging.warning(f"No se pudo añadir el bloque {new_index}.")
-        
-        # Esperar al siguiente intervalo de bloque
-        time.sleep(BLOCK_TIME)
-    
-    except Exception as e:
-        logging.error(f"Error en el ciclo de minado: {e}")
-        time.sleep(BLOCK_TIME)  # Continuar tras un error
+
+        except Exception as e:
+            logging.error(f"Error en el ciclo de minado: {e}")
+            time.sleep(BLOCK_TIME)
