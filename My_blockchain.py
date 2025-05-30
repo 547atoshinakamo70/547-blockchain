@@ -241,14 +241,14 @@ class Blockchain:
             with conn.cursor() as cur:
                 cur.execute("SELECT data FROM blockchain ORDER BY index")
                 chain = [json.loads(row[0]) for row in cur.fetchall()]
+                logging.info(f"Cargados {len(chain)} bloques desde la base de datos.")
                 return [Block(b["index"], [Transaction(**t) for t in b["transactions"]],
                               b["previous_hash"], b["timestamp"], b["nonce"]) for b in chain]
         except Exception as e:
             logging.error(f"Error cargando cadena desde DB: {e}")
-            return []
+            return []  # Si falla, devolvemos una lista vacía, pero esto se puede mejorar
         finally:
             db_pool.putconn(conn)
-
     def load_balances_from_db(self):
         conn = db_pool.getconn()
         try:
