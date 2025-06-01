@@ -250,20 +250,32 @@ def run_server(port=5000):
         # Otros endpoints sin cambios omitidos
 
 # Ejecución principal (sin cambios significativos)
+
 if __name__ == "__main__":
-    blockchain = Blockchain()  # Instancia de tu clase Blockchain
+    blockchain = Blockchain()
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     print("Servidor iniciado")
-    while True: 
-        previous_block = blockchain.chain[-1]
-        new_index = previous_block.index + 1
-        new_timestamp = time.time()
-        reward_tx = Transaction("system", blockchain.owner_public_key, blockchain.get_block_reward(new_index), new_timestamp, {"type": "mining_reward"})
-        transactions = [reward_tx] + blockchain.pending_transactions
-        blockchain.pending_transactions.clear()
-        new_block = Block(new_index, transactions, previous_block.hash, new_timestamp)
-        new_block = blockchain.proof_of_work(new_block)
-        if blockchain.add_block(new_block):
-            logging.info(f"Bloque minado: Índice={new_block.index}, Hash={new_block.hash}")
-        time.sleep(BLOCK_TIME)
+
+    while True:
+        try:
+            previous_block = blockchain.chain[-1]
+            new_index = previous_block.index + 1
+            new_timestamp = time.time()
+            reward_tx = Transaction(
+                "system",
+                blockchain.owner_public_key,  # Ahora está definido
+                blockchain.get_block_reward(new_index),  # Método implementado
+                new_timestamp,
+                {"type": "mining_reward"}
+            )
+            transactions = [reward_tx] + blockchain.pending_transactions
+            blockchain.pending_transactions.clear()
+            new_block = Block(new_index, transactions, previous_block.hash, new_timestamp)
+            new_block = blockchain.proof_of_work(new_block)
+            if blockchain.add_block(new_block):
+                print(f"Bloque minado: Índice={new_block.index}, Hash={new_block.hash}")
+            time.sleep(10)
+        except Exception as e:
+            print(f"Error en el minado: {e}")
+            time.sleep(10)
