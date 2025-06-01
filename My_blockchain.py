@@ -126,29 +126,28 @@ class Block:
     def to_dict(self):
         return {"index": self.index, "transactions": [t.to_dict() for t in self.transactions],
                 "timestamp": self.timestamp, "previous_hash": self.previous_hash, "nonce": self.nonce, "hash": self.hash}
-    # Definición de la función generate_key_pair
+    # Definición de la función generate_key_pair1111
    def generate_key_pair():
-       # Generar una clave privada RSA de 2048 bits
-       private_key = rsa.generate_private_key(
-           public_exponent=65537,  # Exponente público estándar
-           key_size=2048           # Tamaño de la clave (2048 bits es seguro y común)
-       )
-       # Obtener la clave pública asociada
-       public_key = private_key.public_key()
-       # Convertir la clave privada a formato PEM (texto)
-       private_pem = private_key.private_bytes(
-           encoding=serialization.Encoding.PEM,
-           format=serialization.PrivateFormat.PKCS8,
-           encryption_algorithm=serialization.NoEncryption()
-       ).decode('utf-8')
+    # Generar una clave privada RSA
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,  # Valor estándar para el exponente público
+        key_size=2048           # Tamaño de la clave (seguro y común)
+    )
+    # Obtener la clave pública asociada
+    public_key = private_key.public_key()
+    # Convertir la clave privada a formato PEM (texto)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode('utf-8')
     # Convertir la clave pública a formato PEM (texto)
     public_pem = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode('utf-8')
-    # Retornar ambas claves como cadenas de texto
-    return private_pem, public_pem
-
+    # Devolver ambas claves
+    return private_pem, public_pem  # Esta línea debe estar indentada1
 # Clase Blockchain con mejoras
 class Blockchain:
     def __init__(self):
