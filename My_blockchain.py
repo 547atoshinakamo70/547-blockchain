@@ -71,10 +71,7 @@ def validate_with_hidden_model(autoencoder, transaction):
 
 # Función para generar par de claves (movida fuera de Block)
 def generate_key_pair():
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048
-    )
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -86,7 +83,6 @@ def generate_key_pair():
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode('utf-8')
     return private_pem, public_pem
-
 # Clase Transaction
 class Transaction:
     def __init__(self, from_address, to_address, amount, timestamp=None, metadata=None):
