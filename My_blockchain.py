@@ -255,7 +255,7 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     print("Servidor iniciado")
-    while true: 
+    while True: 
         previous_block = blockchain.chain[-1]
         new_index = previous_block.index + 1
         new_timestamp = time.time()
