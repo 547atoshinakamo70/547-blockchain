@@ -258,11 +258,11 @@ def run_server(port=5000):
 
 # Ejecución principal (sin cambios significativos)
 if __name__ == "__main__":
-    blockchain = Blockchain()
+    blockchain = Blockchain()  # Instancia de tu clase Blockchain
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
-    logging.info("Blockchain operativa. Iniciando ciclo de minado...")
-    while True:
+    print("Servidor iniciado")
+    while true: 
         previous_block = blockchain.chain[-1]
         new_index = previous_block.index + 1
         new_timestamp = time.time()
