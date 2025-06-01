@@ -147,12 +147,25 @@ class Block:
 # Clase Blockchain con mejoras
 class Blockchain:
     def __init__(self):
-        # Generamos el par de claves para el propietario
-        self.owner_private_key, self.owner_public_key = generate_key_pair()
-        self.chain = self.load_chain_from_db()
-        self.pending_transactions = []
-        if not self.chain:
-            self.create_genesis_block()
+        # Inicializamos la cadena y los saldos
+        self.chain = []
+        self.balances = {}  # Diccionario para almacenar los saldos
+        self.create_genesis_block()
+
+    def create_genesis_block(self):
+        """Crea el bloque génesis si no hay cadena existente."""
+        # Creamos la transacción génesis
+        genesis_tx = Transaction("genesis", "owner_address", 0)
+        # Creamos el bloque génesis con índice 0, la transacción y hash previo "0"
+        genesis_block = Block(0, [genesis_tx], "0")
+        # Añadimos el bloque a la cadena
+        self.chain.append(genesis_block)
+        # Inicializamos el saldo del propietario en 0
+        self.balances["owner_address"] = 0
+        # Guardamos la cadena y los saldos en la base de datos
+        self.save_chain_to_db()
+        self.save_balances_to_db()
+
     def load_chain_from_db(self):
         conn = db_pool.getconn()
         try:
@@ -249,14 +262,7 @@ class Blockchain:
         finally:
             db_pool.putconn(conn)
 
-    def create_genesis_block(self):
-        """Crea el bloque génesis si no hay cadena existente."""
-        genesis_tx = Transaction("genesis", "owner_address", 0)
-        genesis_block = Block(0, [genesis_tx], "0")
-        self.chain.append(genesis_block)
-        self.balances["owner_address"] = 0
-        self.save_chain_to_db()
-        self.save_balances_to_db()
+    
 
     def add_block(self, transactions):
         """Añade un nuevo bloque a la cadena (ejemplo simplificado)."""
