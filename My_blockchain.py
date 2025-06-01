@@ -127,48 +127,101 @@ class Block:
 # Clase Blockchain con mejoras
 class Blockchain:
     def __init__(self):
-        self.chain = self.load_chain_from_db()
-        self.balances = self.load_balances_from_db()
-        self.pending_transactions = []
-        self.peers = []
-        self.commissions_collected = 0
-        if not self.chain:
-            self.owner_private_key, self.owner_public_key = self.create_genesis_block()
-        else:
-            print("Blockchain ya inicializada. Dirección propietaria:", self.owner_public_key)
+        self.chain = self.load_chain_from_db()  # Carga la cadena desde la base de datos
+        self.balances = self.load_balances_from_db()  # Carga los saldos
+        if not self.chain:  # Si no hay cadena, crea el bloque génesis
+            self.create_genesis_block()
 
-    def proof_of_work(self, block, difficulty=5):  # Dificultad aumentada
-        target = '0' * difficulty
-        while block.hash[:difficulty] != target:
-            block.nonce += 1
-            block.hash = block.calculate_hash()
-        return block
+    def load_chain_from_db(self):
+        """Carga la cadena de bloques desde la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                # Suponiendo una tabla 'blockchain' con columnas 'index' y 'data'
+                cur.execute("SELECT data FROM blockchain ORDER BY index")
+                rows = cur.fetchall()
+                if not rows:
+                    return []  # Retorna lista vacía si no hay datos
+                chain = []
+                for row in rows:
+                    block_data = json.loads(row[0])
+                    transactions = [Transaction(**t) for t in block_data["transactions"]]
+                    block = Block(
+                        block_data["index"], 
+                        transactions, 
+                        block_data["previous_hash"], 
+                        block_data["timestamp"]
+                    )
+                    chain.append(block)
+                print(f"Cargados {len(chain)} bloques desde la base de datos.")
+                return chain
+        except Exception as e:
+            print(f"Error cargando cadena desde DB: {e}")
+            return []
+        finally:
+            db_pool.putconn(conn)
 
-    def validate_transaction(self, tx):
-        if tx.from_address not in ["system", "genesis"]:
-            commission = int(tx.amount * COMMISSION_RATE)
-            if not validate_with_hidden_model(autoencoder, tx) or not tx.verify_signature() or self.balances.get(tx.from_address, 0) < (tx.amount + commission):
-                return False
-        return True
+    def load_balances_from_db(self):
+        """Carga los saldos desde la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                # Suponiendo una tabla 'balances' con columnas 'address' y 'balance'
+                cur.execute("SELECT address, balance FROM balances")
+                return {row[0]: row[1] for row in cur.fetchall()}
+        except Exception as e:
+            print(f"Error cargando saldos desde DB: {e}")
+            return {}
+        finally:
+            db_pool.putconn(conn)
 
-    def add_block(self, block):
-        if self.validate_block(block):
-            self.chain.append(block)
-            for tx in block.transactions:
-                if tx.from_address == "system":
-                    self.balances[tx.to_address] = self.balances.get(tx.to_address, 0) + tx.amount
-                elif tx.from_address != "genesis":
-                    commission = int(tx.amount * COMMISSION_RATE)
-                    self.balances[tx.from_address] -= (tx.amount + commission)
-                    self.balances[tx.to_address] = self.balances.get(tx.to_address, 0) + tx.amount
-                    self.balances[self.owner_public_key] += commission
-                    self.commissions_collected += commission
-                else:
-                    self.balances[tx.to_address] = self.balances.get(tx.to_address, 0) + tx.amount
-            self.save_chain_to_db()
-            self.save_balances_to_db()
-            return True
-        return False
+    def save_chain_to_db(self):
+        """Guarda la cadena de bloques en la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                for block in self.chain:
+                    cur.execute(
+                        "INSERT INTO blockchain (index, data) VALUES (%s, %s) ON CONFLICT (index) DO UPDATE SET data = %s",
+                        (block.index, json.dumps(block.to_dict()), json.dumps(block.to_dict()))
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f"Error guardando cadena en DB: {e}")
+        finally:
+            db_pool.putconn(conn)
+
+    def save_balances_to_db(self):
+        """Guarda los saldos en la base de datos."""
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                for address, balance in self.balances.items():
+                    cur.execute(
+                        "INSERT INTO balances (address, balance) VALUES (%s, %s) ON CONFLICT (address) DO UPDATE SET balance = %s",
+                        (address, balance, balance)
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f"Error guardando saldos en DB: {e}")
+        finally:
+            db_pool.putconn(conn)
+
+    def create_genesis_block(self):
+        """Crea el bloque génesis si no hay cadena existente."""
+        genesis_tx = Transaction("genesis", "owner_address", 0)
+        genesis_block = Block(0, [genesis_tx], "0")
+        self.chain.append(genesis_block)
+        self.balances["owner_address"] = 0
+        self.save_chain_to_db()
+        self.save_balances_to_db()
+
+    def add_block(self, transactions):
+        """Añade un nuevo bloque a la cadena (ejemplo simplificado)."""
+        previous_block = self.chain[-1]
+        new_block = Block(len(self.chain), transactions, previous_block.hash)
+        self.chain.append(new_block)
+        self.save_chain_to_db()
 
     # Métodos sin cambios omitidos por brevedad (load_chain_from_db, save_chain_to_db, etc.)
 
