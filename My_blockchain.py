@@ -236,30 +236,24 @@ class Blockchain:
 
 # Servidor HTTP con nuevo endpoint
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
-    def _set_headers(self, code=200):
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
+    def do_GET(self):
+        if self.path == "/chain":
+            # Devolver la cadena de bloques en formato JSON
+            chain_data = [block.to_dict() for block in blockchain.chain]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"chain": chain_data}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
 
-    def do_POST(self):
-        if self.path == "/new_transaction":
-            content_length = int(self.headers.get("Content-Length", 0))
-            post_data = self.rfile.read(content_length)
-            try:
-                tx_data = json.loads(post_data)
-                tx = Transaction(tx_data["from"], tx_data["to"], tx_data["amount"], tx_data.get("timestamp"), tx_data.get("metadata", {}))
-                tx.sign(tx_data["private_key"])
-                tx.generate_zk_proof()
-                if blockchain.validate_transaction(tx):
-                    blockchain.pending_transactions.append(tx)
-                    self._set_headers(201)
-                    self.wfile.write(json.dumps({"message": "Transaction added to pending list"}).encode())
-                else:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({"error": "Invalid transaction"}).encode())
-            except Exception as e:
-                self._set_headers(500)
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
+# Función para iniciar el servidor
+def run_server(port=5000):
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, BlockchainHTTPRequestHandler)
+    print(f"Iniciando servidor en el puerto {port}")
+    httpd.serve_forever()
         # Otros endpoints sin cambios omitidos
 
 # Ejecución principal (sin cambios significativos)
