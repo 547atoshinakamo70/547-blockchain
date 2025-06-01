@@ -136,40 +136,33 @@ class Blockchain:
             self.create_genesis_block()
 
     def load_chain_from_db(self):
-        conn = db_pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT data FROM blockchain ORDER BY index")
-                rows = cur.fetchall()
-                if not rows:
-                    return []
-                chain = []
-                for row in rows:
-                    block_data = row[0]
-                    # Verificar el tipo de block_data
-                    if isinstance(block_data, dict):
-                        pass  # Ya es un diccionario, no necesita parseo
-                    elif isinstance(block_data, str):
-                        block_data = json.loads(block_data)
-                    else:
-                        raise ValueError(f"Tipo de dato inesperado para block_data: {type(block_data)}")
-                    # Reconstruir el bloque
-                    transactions = [Transaction(**t) for t in block_data["transactions"]]
-                    block = Block(
-                        block_data["index"],
-                        transactions,
-                        block_data["previous_hash"],
-                        block_data["timestamp"]
-                   )
-                   chain.append(block)
-               print(f"Cargados {len(chain)} bloques desde la base de datos.")
-               return chain
-       except Exception as e:
-           print(f"Error cargando cadena desde DB: {e}")
-           return []
-       finally:
-           db_pool.putconn(conn)
-
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM blockchain ORDER BY index")
+            rows = cur.fetchall()
+            if not rows:
+                return []
+            chain = []
+            for row in rows:
+                block_data = row[0]
+                if isinstance(block_data, str):
+                    block_data = json.loads(block_data)
+                transactions = [Transaction(**t) for t in block_data["transactions"]]
+                block = Block(
+                    block_data["index"],
+                    transactions,
+                    block_data["previous_hash"],
+                    block_data["timestamp"]
+                )
+                chain.append(block)  # Ahora correctamente indentado
+            print(f"Cargados {len(chain)} bloques desde la base de datos.")
+            return chain
+    except Exception as e:
+        print(f"Error cargando cadena desde DB: {e}")
+        return []
+    finally:
+        db_pool.putconn(conn)
     def load_balances_from_db(self):
         """Carga los saldos desde la base de datos."""
         conn = db_pool.getconn()
