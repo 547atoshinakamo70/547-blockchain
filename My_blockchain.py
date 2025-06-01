@@ -130,10 +130,34 @@ class Block:
 # Clase Blockchain con mejoras
 class Blockchain:
     def __init__(self):
-        self.chain = self.load_chain_from_db()  # Carga la cadena desde la base de datos
-        self.balances = self.load_balances_from_db()  # Carga los saldos
-        if not self.chain:  # Si no hay cadena, crea el bloque génesis
+        # Generamos el par de claves para el propietario
+        self.owner_private_key, self.owner_public_key = generate_key_pair()
+        self.chain = self.load_chain_from_db()
+        self.pending_transactions = []
+        if not self.chain:
             self.create_genesis_block()
+
+    def load_chain_from_db(self):
+        conn = db_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM blockchain ORDER BY index")
+                rows = cur.fetchall()
+                if not rows:
+                    return []
+                chain = []
+                for row in rows:
+                    block_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                    transactions = [Transaction(**t) for t in block_data["transactions"]]
+                    block = Block(block_data["index"], transactions, block_data["previous_hash"], block_data["timestamp"])
+                    chain.append(block)
+                print(f"Cargados {len(chain)} bloques desde la base de datos.")
+                return chain
+        except Exception as e:
+            print(f"Error cargando cadena desde DB: {e}")
+            return []
+        finally:
+            db_pool.putconn(conn)
 
     def load_chain_from_db(self):
     conn = db_pool.getconn()
