@@ -128,7 +128,6 @@ class Block:
                 "timestamp": self.timestamp, "previous_hash": self.previous_hash, "nonce": self.nonce, "hash": self.hash}
     # Definición de la función generate_key_pair1111
    def generate_key_pair():
-   def generate_key_pair():
     private_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048
@@ -143,7 +142,7 @@ class Block:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     ).decode('utf-8')
-    return private_pem, public_pem  # Correctamente indentado
+    return private_pem, public_pem
 
 # Clase Blockchain con mejoras
 class Blockchain:
