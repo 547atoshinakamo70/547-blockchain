@@ -275,6 +275,13 @@ def run_server(port=5000):
     httpd = HTTPServer(server_address, BlockchainHTTPRequestHandler)
     print(f"Iniciando servidor en el puerto {port}")
     httpd.serve_forever()
+  
+  # Función para manejar la interrupción (Ctrl+C)
+def handle_interrupt(signal, frame):
+    print("Deteniendo el minado de manera segura...")
+    blockchain.save_chain_to_db()  # Guarda la cadena de bloques
+    blockchain.save_balances_to_db()  # Guarda los saldos
+    sys.exit(0)  # Termina el proceso
 
 if __name__ == "__main__":
     blockchain = Blockchain()
