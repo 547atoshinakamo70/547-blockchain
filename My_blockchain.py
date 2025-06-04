@@ -220,22 +220,21 @@ class Blockchain:
             return []  # Devuelve una lista vacía en caso de error
         finally:
             self.db_pool.putconn(conn)
-        finally:
-            self.db_pool.putconn(conn)
+       
 
 
 
     def load_balances_from_db(self):
-        conn = db_pool.getconn()
+        conn = self.db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT address, balance FROM balances")
                 return {row[0]: row[1] for row in cur.fetchall()}
         finally:
-            db_pool.putconn(conn)
+            self.db_pool.putconn(conn)
 
     def save_chain_to_db(self):
-        conn = db_pool.getconn()
+        conn = self.db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 for block in self.chain:
@@ -243,10 +242,10 @@ class Blockchain:
                                 (block.index, json.dumps(block.to_dict()), json.dumps(block.to_dict())))
                 conn.commit()
         finally:
-            db_pool.putconn(conn)
+            self.db_pool.putconn(conn)
 
     def save_balances_to_db(self):
-        conn = db_pool.getconn()
+        conn = self.db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 for address, balance in self.balances.items():
@@ -254,7 +253,7 @@ class Blockchain:
                                 (address, balance, balance))
                 conn.commit()
         finally:
-            db_pool.putconn(conn)
+            self.db_pool.putconn(conn)
 
     def get_block_reward(self, index):
         halvings = index // 210000
