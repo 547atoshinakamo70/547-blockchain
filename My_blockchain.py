@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+import os
 
 # Configuración inicial
 load_dotenv()
@@ -169,13 +170,13 @@ class P2PNetwork:
         client.send(json.dumps({"type": "GET_CHAIN"}).encode())
 
 class Blockchain:
-    def __init__(self):
+    def __init__(self, db_pool):
+        self.db_pool = db_pool
         self.owner_private_key, self.owner_public_key = generate_key_pair()
         self.chain = self.load_chain_from_db()
         self.balances = self.load_balances_from_db()
         self.pending_transactions = []
         self.network = P2PNetwork()
-        self.db_pool.getconn()
         if not self.chain:
             self.create_genesis_block()
 
@@ -194,31 +195,35 @@ class Blockchain:
                 cur.execute("SELECT data FROM blockchain ORDER BY index")
                 rows = cur.fetchall()
                 if not rows:
-                    return []
+                    return []  # Devuelve una lista vacía si no hay datos
                 chain = []
                 for row in rows:
-                    block_data = json.loads(row[0])
+                    block_data = row[0]
+                    if isinstance(block_data, str):
+                        block_data = json.loads(block_data)
+                    elif isinstance(block_data, dict):
+                        pass
+                    else:
+                        raise ValueError(f"Tipo de dato inesperado: {type(block_data)}")
                     transactions = [Transaction(**t) for t in block_data["transactions"]]
-                    block = Block(block_data["index"], transactions, block_data["previous_hash"],
-                                  block_data["timestamp"], block_data["nonce"])
+                    block = Block(
+                        block_data["index"],
+                        transactions,
+                        block_data["previous_hash"],
+                        block_data["timestamp"]
+                    )
                     chain.append(block)
-                return chain
+                print(f"Cargados {len(chain)} bloques desde la base de datos.")
+                return chain  # Devuelve la cadena cargada
+        except Exception as e:
+            print(f"Error cargando cadena desde DB: {e}")
+            return []  # Devuelve una lista vacía en caso de error
+        finally:
+            self.db_pool.putconn(conn)
         finally:
             self.db_pool.putconn(conn)
 
-# Crear el pool y la instancia
-db_pool = psycopg2.pool.ThreadedConnectionPool(
-    minconn=1,
-    maxconn=50,
-    dbname="blockchain",
-    user="postgres",
-    password=os.getenv('DB_PASSWORD'),
-    host="localhost",
-    port="5432"
-)
 
-blockchain = Blockchain(db_pool)  # Pasar db_pool al instanciar
-blockchain.load_chain_from_db()   # Llamar al método
 
     def load_balances_from_db(self):
         conn = db_pool.getconn()
@@ -324,16 +329,29 @@ def run_server(port=5000):
     httpd = HTTPServer(server_address, BlockchainHTTPRequestHandler)
     print(f"Iniciando servidor HTTP en el puerto {port}")
     httpd.serve_forever()
+  
+# Crear el pool de conexiones
+db_pool = psycopg2.pool.ThreadedConnectionPool(
+    1,
+    20,
+    dbname="blockchain",# Nombre de tu base de datos
+    user="postgres",    # Usuario de la base de datos
+    password=os.getenv('DB_PASSWORD'),  # Contraseña (obtenida de una variable de entorno)
+    host="localhost",   # Host del servidor
+    port="5432"         # Puerto del servidor
+)
 
 if __name__ == "__main__":
-    blockchain = Blockchain()
+    blockchain = Blockchain(db_pool)
+    chain = blockchain.load_chain_from_db()
     blockchain.network.start()
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     print("Servidor HTTP y P2P iniciados")
 
+
     # Conectar a otro nodo (ejemplo)
-    blockchain.network.connect_to_peer("localhost", 6001)
+    blockchain.network.connect_to_peer("localhost", 5432)
 
     while True:
         try:
