@@ -34,8 +34,8 @@ Create a virtual environment (optional but recommended):
 
 bash
 python3 -m venv env
-source env/bin/activate  # On Linux/macOS
-env\Scripts\activate     # On Windows
+source env/bin/activate  # On Linux
+
 Install dependencies:
 Create a file named requirements.txt with the following content:
 ecdsa
