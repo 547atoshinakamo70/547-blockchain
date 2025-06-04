@@ -175,6 +175,7 @@ class Blockchain:
         self.balances = self.load_balances_from_db()
         self.pending_transactions = []
         self.network = P2PNetwork()
+        self.db_pool.getconn()
         if not self.chain:
             self.create_genesis_block()
 
@@ -187,7 +188,7 @@ class Blockchain:
         self.save_balances_to_db()
 
     def load_chain_from_db(self):
-        conn = db_pool.getconn()
+        conn = self.db_pool.getconn()
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT data FROM blockchain ORDER BY index")
@@ -203,7 +204,21 @@ class Blockchain:
                     chain.append(block)
                 return chain
         finally:
-            db_pool.putconn(conn)
+            self.db_pool.putconn(conn)
+
+# Crear el pool y la instancia
+db_pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=1,
+    maxconn=50,
+    dbname="blockchain",
+    user="postgres",
+    password=os.getenv('DB_PASSWORD'),
+    host="localhost",
+    port="5432"
+)
+
+blockchain = Blockchain(db_pool)  # Pasar db_pool al instanciar
+blockchain.load_chain_from_db()   # Llamar al método
 
     def load_balances_from_db(self):
         conn = db_pool.getconn()
