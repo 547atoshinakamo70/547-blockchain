@@ -1,4 +1,5 @@
  Here is a complete and detailed README.md file for your blockchain code, written in English as requested. This file is designed to explain how your project works, how to set it up, and how to use it, making it easy for anyone to understand and run the code.
+
 README.md
 markdown
 # My Blockchain (5470)
@@ -31,11 +32,10 @@ Follow these steps to set up the project on your machine:
    git clone https://github.com/547atoshinakamo70/547-blockchain
    cd my_blockchain
 Create a virtual environment (optional but recommended):
-
 bash
 python3 -m venv env
-source env/bin/activate  # On Linux
-
+source env/bin/activate  # On Linux/macOS
+env\Scripts\activate     # On Windows
 Install dependencies:
 Create a file named requirements.txt with the following content:
 ecdsa
@@ -108,4 +108,3 @@ This project is licensed under the MIT License. See the LICENSE file for more de
 
 ---
 
-This `README.md` provides a comprehensive guide to your blockchain project, from installation to usage examples, tailored specifically to the code described. It’s written in English, as you requested, and uses Markdown formatting for clarity and readability. If you need further details or adjustments, feel free to let me know. I hope this is helpful!
