@@ -1,146 +1,110 @@
-Here’s a comprehensive guide in English to help you run the provided blockchain code and mine the cryptocurrency "5470" (symbol: "547"). This guide assumes you have basic technical knowledge, such as familiarity with command-line tools and Python. Follow these steps carefully to set up the environment, execute the code, and start mining.
-Guide to Running the Blockchain Code and Mining the Cryptocurrency
-This guide will walk you through setting up and running a blockchain system written in Python, which includes features like block creation, transaction validation using AI, zero-knowledge proofs (zk-proofs), and an HTTP server for interaction. By the end, you’ll be able to run the blockchain and mine new blocks to earn "547" tokens.
-Introduction
-The provided code implements a blockchain for the "5470" cryptocurrency with a total supply of 5,470,000 tokens, mined gradually. It uses PostgreSQL for storage, TensorFlow for AI-based transaction validation, and an HTTP server for network interaction. Mining involves proposing valid blocks to the chain, earning a reward that halves every 210,000 blocks, starting at 50 tokens per block.
-Prerequisites
-Before starting, ensure you have the following:
-Hardware: A computer with at least 4GB RAM and sufficient disk space for PostgreSQL.
-Software:
-Python 3.8 or higher (download from python.org).
-PostgreSQL (download from postgresql.org).
-Git (optional, for cloning repositories).
-Step 1: Install Dependencies
-The code relies on several Python libraries. Install them using pip:
+ Here is a complete and detailed README.md file for your blockchain code, written in English as requested. This file is designed to explain how your project works, how to set it up, and how to use it, making it easy for anyone to understand and run the code.
+README.md
+markdown
+# My Blockchain (5470)
+
+A custom blockchain implementation in Python, designed as a full node with support for proof-of-work (PoW), peer-to-peer (P2P) networking, and transaction validation using a TensorFlow-based autoencoder.
+
+## Description
+
+This project implements a blockchain with the following key features:
+- **Proof-of-Work (PoW)**: Blocks are mined by solving a computational problem with a fixed difficulty (4 leading zeros in the hash).
+- **P2P Network**: Nodes connect to each other to synchronize the chain and propagate blocks and transactions.
+- **Transaction Validation**: A TensorFlow autoencoder detects anomalies in transactions.
+- **Persistence in PostgreSQL**: The chain and balances are stored in a database to maintain state.
+- **HTTP API**: Allows querying the full chain at `http://localhost:5000/chain`.
+
+The project includes cryptography with RSA and ECDSA (SECP256k1) keys for signing transactions, a mining reward system with halving, and transaction fees.
+
+## Requirements
+
+- **Python 3.8+**
+- **PostgreSQL** (with a database named `blockchain` and the required tables)
+- **Python Dependencies** (listed in `requirements.txt`)
+
+## Installation
+
+Follow these steps to set up the project on your machine:
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/547atoshinakamo70/547-blockchain
+   cd my_blockchain
+Create a virtual environment (optional but recommended):
 bash
-pip install ecdsa cryptography psycopg2-binary pika tensorflow numpy python-dotenv requests
-Notes:
-TensorFlow: Installation may vary by operating system. Follow the TensorFlow installation guide if you encounter issues (e.g., you might need specific versions or GPU support).
-psycopg2-binary: This connects Python to PostgreSQL. Ensure PostgreSQL is installed first (see Step 2).
-Step 2: Set Up the Database
-The blockchain stores its chain and balances in a PostgreSQL database. Here’s how to configure it:
-Install PostgreSQL:
-Follow the instructions for your OS at postgresql.org/download.
-Create the Database:
-Open a terminal and log into PostgreSQL:
+python3 -m venv env
+source env/bin/activate  # On Linux/macOS
+env\Scripts\activate     # On Windows
+Install dependencies:
+Create a file named requirements.txt with the following content:
+ecdsa
+cryptography
+psycopg2-binary
+tensorflow
+numpy
+python-dotenv
+Then run:
 bash
-psql -U postgres
-Create the database:
+pip install -r requirements.txt
+Configure PostgreSQL:
+Ensure PostgreSQL is installed and running.
+Create the blockchain database:
 sql
 CREATE DATABASE blockchain;
-(Optional) Create a user and set a password:
+Create the necessary tables:
 sql
-CREATE USER myuser WITH PASSWORD 'mypassword';
-GRANT ALL PRIVILEGES ON DATABASE blockchain TO myuser;
-Exit with \q.
-Initialize Tables:
-The code expects two tables: blockchain (for blocks) and balances (for account balances). Run these SQL commands in psql:
-sql
-\c blockchain
-CREATE TABLE blockchain (
-    index INTEGER PRIMARY KEY,
-    data TEXT NOT NULL
-);
-CREATE TABLE balances (
-    address TEXT PRIMARY KEY,
-    balance BIGINT NOT NULL
-);
-Step 3: Create the .env File
-The code uses environment variables loaded from a .env file. Create this file in the same directory as your script (e.g., blockchain.py) with the following content:
-DB_PASSWORD=mypassword
-FERNET_KEY=your_fernet_key_here
-KYC_API_URL=https://example.com/verify  # Optional
-DB_PASSWORD: Replace mypassword with your PostgreSQL user’s password.
-FERNET_KEY: Generate a key for encryption using this Python snippet:
+CREATE TABLE blockchain (index SERIAL PRIMARY KEY, data JSONB);
+CREATE TABLE balances (address TEXT PRIMARY KEY, balance BIGINT);
+Configure the .env file:
+Create a .env file in the project root with the following content:
+DB_PASSWORD=your_postgres_password
+FERNET_KEY=your_optional_fernet_key
+If you don’t provide a FERNET_KEY, one will be generated automatically when the node starts.
+Usage
+Run the node:
+bash
+python3 blockchain_node.py
+The node starts a P2P server on localhost:6000.
+The HTTP server runs on localhost:5000.
+It begins mining blocks every 10 seconds (configurable via BLOCK_TIME).
+Connect to other nodes:
+Edit the code to connect to another node, for example:
 python
-from cryptography.fernet import Fernet
-print(Fernet.generate_key().decode())
-Copy the output into the .env file.
-KYC_API_URL: Optional. Leave it as is or remove it if not using a KYC service.
-Step 4: Configure zk_proof_verifier
-The code calls an external executable zk_proof_verifier for zero-knowledge proofs. Since it’s not provided, simulate it for testing:
-Create a Dummy Executable:
-On Linux/Mac, create a file named zk_proof_verifier:
+blockchain.network.connect_to_peer("localhost", 6001)
+Ensure the other node is running and accessible.
+Query the chain:
+Open a browser or use curl to view the chain in JSON format:
 bash
-#!/bin/bash
-echo "valid"
-Make it executable:
-bash
-chmod +x zk_proof_verifier
-Place it in the same directory as your script.
-Windows Alternative:
-Create a file named zk_proof_verifier.bat:
-bat
-@echo valid
-Ensure it’s in the script’s directory.
-Note: For a real deployment, replace this with a proper zk-proof verification tool.
-Step 5: Run the Main Script
-Save the Code:
-Copy the provided code into a file named blockchain.py.
-Execute the Script:
-Open a terminal in the script’s directory and run:
-bash
-python3 blockchain.py
-This starts the blockchain and an HTTP server on port 5000. You’ll see logs indicating the server is running.
-Expected Output:
-The script creates a genesis block if the database is empty and prints the owner’s private and public keys. Save the private key securely—it’s needed for signing transactions.
-Step 6: Mining Blocks
-The code doesn’t include an automated miner, so you’ll propose blocks manually via the HTTP API to mine "547" tokens. Here’s how:
-Understand Block Rewards:
-The initial reward is 50 tokens, halving every 210,000 blocks.
-You earn the reward by proposing a valid block containing a reward transaction from "system" to your address.
-Get Your Public Key:
-When you first run the script, it prints the owner’s public key (e.g., a PEM-formatted RSA key). This is your address for receiving rewards.
-Propose a Block:
-Use a tool like curl or Postman to send a POST request to http://localhost:5000/propose_block.
-Example payload for the first block after genesis (index 1):
-json
-{
-  "index": 1,
-  "transactions": [
-    {
-      "from": "system",
-      "to": "your_public_key_here",
-      "amount": 50,
-      "timestamp": 1698771234.0,
-      "metadata": {}
-    }
-  ],
-  "timestamp": 1698771234.0,
-  "previous_hash": "0",
-  "nonce": 0
-}
-Replace "your_public_key_here" with your public key from Step 5.
-Update timestamp to the current time (e.g., run time.time() in Python).
-"previous_hash": "0" is correct for the first block after genesis. For subsequent blocks, use the hash of the last block (accessible via GET /chain).
-Send the Request:
-Using curl:
-bash
-curl -X POST -H "Content-Type: application/json" -d '{"index": 1, "transactions": [{"from": "system", "to": "your_public_key_here", "amount": 50, "timestamp": 1698771234.0, "metadata": {}}], "timestamp": 1698771234.0, "previous_hash": "0", "nonce": 0}' http://localhost:5000/propose_block
-A 201 response ({"message": "Block added successfully"}) means the block was mined, and your balance increased by 50 tokens.
-Check Your Balance:
-Query your balance with:
-bash
-curl http://localhost:5000/balance?address=your_public_key_here
-Repeat:
-Increment index, update previous_hash to the new block’s hash, and adjust timestamp. Only one "system" transaction (reward) is allowed per block.
-Security Considerations
-Private Key Safety: Store your private key securely (e.g., in an encrypted file). Never share it—it controls your funds.
-Database Security: Use a strong PostgreSQL password and restrict access (e.g., update pg_hba.conf).
-Network Security: For public use, secure the HTTP server with HTTPS and authentication.
-Troubleshooting
-Database Errors:
-Check DB_PASSWORD in .env matches your PostgreSQL setup.
-Ensure PostgreSQL is running (sudo service postgresql start on Linux).
-ModuleNotFoundError:
-Verify all libraries are installed (pip list).
-Block Rejection:
-Ensure previous_hash matches the last block’s hash.
-Only one "system" transaction per block is allowed.
-Port Conflict:
-If port 5000 is in use, edit run_server(port=5000) in the code to another port (e.g., 5001).
-Next Steps
-Automate Mining: Write a script to propose blocks periodically, fetching the latest chain state from /chain.
-Join a Network: Register peers via POST /register_peer to sync with others.
-Enhance AI Model: Train nn_model with real transaction data for better validation.
-By following this guide, you can run the blockchain and mine "547" tokens. Happy mining! If you need further assistance, feel free to ask.
+curl http://localhost:5000/chain
+Key Features
+PoW Mining: Each block requires a hash starting with 4 zeros, adjusted by a nonce.
+P2P Network: Nodes synchronize the chain and share new blocks and transactions.
+AI Validation: An autoencoder verifies transactions based on features like addresses, amount, and timestamp.
+Cryptography: Uses RSA for owner keys and ECDSA for signing/verifying transactions.
+Rewards and Fees: Miners receive a reward (initially 50, halving every 210,000 blocks) and a 0.2% transaction fee.
+Example Usage
+Create and sign a transaction:
+python
+# Generate keys
+private_key, public_key = generate_key_pair()
+tx = Transaction(public_key, blockchain.owner_public_key, 10)
+tx.sign(private_key[2:-1])  # Remove PEM prefixes/suffixes for ECDSA
+if blockchain.is_valid_transaction(tx):
+    blockchain.pending_transactions.append(tx)
+    blockchain.network.broadcast({"type": "NEW_TX", "data": tx.to_dict()})
+Manually mine a block:
+python
+blockchain.mine_block()
+Important Notes
+Database: Ensure PostgreSQL is configured and the tables exist before running the node.
+P2P Network: Nodes must be on the same network or have public IPs to connect.
+Dependencies: Make sure to install all libraries listed in requirements.txt.
+Autoencoder: The model is initially trained with random data; for real use, train it with valid transactions.
+Contributions
+Feel free to contribute! Open an issue or submit a pull request on the repository for suggestions or improvements.
+License
+This project is licensed under the MIT License. See the LICENSE file for more details.
+
+---
+
+This `README.md` provides a comprehensive guide to your blockchain project, from installation to usage examples, tailored specifically to the code described. It’s written in English, as you requested, and uses Markdown formatting for clarity and readability. If you need further details or adjustments, feel free to let me know. I hope this is helpful!
