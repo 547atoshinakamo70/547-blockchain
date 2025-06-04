@@ -31,6 +31,7 @@ Follow these steps to set up the project on your machine:
    git clone https://github.com/547atoshinakamo70/547-blockchain
    cd my_blockchain
 Create a virtual environment (optional but recommended):
+
 bash
 python3 -m venv env
 source env/bin/activate  # On Linux/macOS
