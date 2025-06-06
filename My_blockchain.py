@@ -162,13 +162,21 @@ class P2PNetwork:
             except:
                 self.peers.remove(peer)
 
-    def connect_to_peer(self, peer_host, peer_port):
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect((peer_host, peer_port))
-        self.peers.append(client)
-        threading.Thread(target=self.handle_peer, args=(client,), daemon=True).start()
-        client.send(json.dumps({"type": "GET_CHAIN"}).encode())
-
+    def connect_to_peer(self, peer_host, peer_port, retries=5, delay=2):
+        for attempt in range(retries):
+            try:
+                client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                client.connect((peer_host, peer_port))
+                self.peers.append(client)
+                threading.Thread(target=self.handle_peer, args=(client,), daemon=True).start()
+                client.send(json.dumps({"type": "GET_CHAIN"}).encode())
+                print(f"Conectado a {peer_host}:{peer_port}")
+               return
+           except ConnectionRefusedError:
+               print(f"Intento {attempt + 1}: No se pudo conectar a {peer_host}:{peer_port}. Reintentando...")
+               time.sleep(delay)
+       print(f"No se pudo conectar a {peer_host}:{peer_port} tras {retries} intentos.")
+       raise ConnectionRefusedError(f"No se pudo conectar a {peer_host}:{peer_port}")
 class Blockchain:
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -350,7 +358,7 @@ if __name__ == "__main__":
 
 
     # Conectar a otro nodo (ejemplo)
-    blockchain.network.connect_to_peer("localhost", 5432)
+    blockchain.network.connect_to_peer("localhost", 6001)
 
     while True:
         try:
