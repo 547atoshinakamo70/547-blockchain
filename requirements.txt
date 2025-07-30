@@ -1,0 +1,11 @@
+ecdsa
+cryptography
+psycopg2-binary
+tensorflow
+numpy
+python-dotenv
+web3
+eth-keys
+eth-utils
+pysnark
+py-evm
