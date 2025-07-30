@@ -149,7 +149,7 @@ class HDWallet:
         return {"private_key": priv_hex, "address": addr}
 
 # --- Autoencoder persistence ---
-AUTOENCODER_FILE = "autoencoder.h5"
+AUTOENCODER_FILE = "autoencoder.weights.h5"
 if tf and layers:
     autoencoder = tf.keras.Sequential([
         layers.Dense(32, activation='relu', input_shape=(4,)),
