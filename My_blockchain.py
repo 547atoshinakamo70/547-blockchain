@@ -68,8 +68,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 load_dotenv()
 FERNET_KEY = os.getenv('FERNET_KEY')
 if not FERNET_KEY:
-    logging.error("FERNET_KEY not set in .env; aborting.")
-    sys.exit(1)
+    FERNET_KEY = Fernet.generate_key().decode()
+    logging.warning(
+        "FERNET_KEY not set in .env; generated ephemeral key")
 cipher = Fernet(FERNET_KEY.encode())
 
 # DB pool
