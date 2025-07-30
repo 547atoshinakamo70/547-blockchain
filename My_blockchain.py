@@ -220,7 +220,7 @@ class Blockchain(MiningChain):
                 if not rows:
                     return
                 for idx, raw in rows:
-                    blk = Block(**raw)
+                    blk = Block(**json.loads(raw))
                     self.chain.append(blk)
                 cur.execute("SELECT address, balance FROM balances")
                 for addr, bal in cur.fetchall():
