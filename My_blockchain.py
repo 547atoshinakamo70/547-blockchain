@@ -103,9 +103,15 @@ load_dotenv()
 FERNET_KEY = os.getenv('FERNET_KEY')
 if not FERNET_KEY:
     gen = Fernet.generate_key()
-    FERNET_KEY = gen.hex() if isinstance(gen, bytes) else str(gen)
-    logging.warning(
-        "FERNET_KEY not set in .env; generated ephemeral key")
+    if isinstance(gen, bytes):
+        try:
+            FERNET_KEY = gen.decode()
+        except Exception:
+            FERNET_KEY = gen.hex()
+    else:
+        FERNET_KEY = str(gen)
+    logging.info(
+        "Generated new FERNET_KEY; add it to .env to persist")
 try:
     cipher = Fernet(FERNET_KEY.encode())
 except Exception:
@@ -316,7 +322,6 @@ class Blockchain:
 
     def load_state(self):
         if not self.db_pool:
-            logging.warning("DB disabled; starting with empty state")
             return
         try:
             conn=self.db_pool.getconn()
