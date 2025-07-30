@@ -200,28 +200,41 @@ load_or_train_autoencoder()
 ANOMALY_LOG = "anomalies.log"
 ANOMALY_THRESHOLD = 0.1
 
-def validate_with_hidden_model(tx, zk_vk=None):
+def validate_with_hidden_model(tx, zk_vk=None) -> bool:
     if not tf or not np:
         return True
-    # signature and balance/nonce checks happen elsewhere
+
+    # Preparar características básicas
     f1 = f2 = 0.0
     try:
-        f1 = float(int(tx.from_address[:8],16))
-        f2 = float(int(tx.to_address[:8],16))
-    except: pass
-    f3, f4 = float(tx.amount), float(tx.timestamp)
-    inp = np.array([[f1,f2,f3,f4]])
+        f1 = float(int(tx.from_address[:8], 16))
+        f2 = float(int(tx.to_address[:8], 16))
+    except:
+        pass
+
+    # --- NORMALIZACIÓN AQUI ---
+    # Convertimos satoshis a “número de monedas” y escalamos
+    f3 = float(tx.amount) / BASE_UNIT           # ahora en unidades de moneda
+    # Tomamos días desde el 13 Sep 2020 (1600000000s), escalando a ~[0,10]
+    f4 = (tx.timestamp - 1_600_000_000) / 86_400
+    # -------------------------
+
+    inp = np.array([[f1, f2, f3, f4]])
     rec = autoencoder.predict(inp, verbose=0)
-    mse = float(np.mean((inp-rec)**2))
+    mse = float(np.mean((inp - rec) ** 2))
+
     if mse >= ANOMALY_THRESHOLD:
-        with open(ANOMALY_LOG,"a") as f:
+        with open(ANOMALY_LOG, "a") as f:
             f.write(f"{datetime.now().isoformat()} ANOMALY tx={tx.to_dict()} mse={mse}\n")
         return False
-    # zk proof
-    if getattr(tx,"proof",None) is not None:
+
+    # ZK‑SNARK proof (si aplica)
+    if getattr(tx, "proof", None) is not None:
         if not zk_vk or not tx.verify(zk_vk):
             return False
+
     return True
+
 
 # --- Key gen ---
 def generate_rsa_key_pair():
@@ -376,19 +389,31 @@ class Blockchain:
             block.hash=block.calculate_hash()
         return block
 
-    def is_valid_transaction(self,tx):
-        # signature
-        if tx.from_address not in ("system", "genesis"):
-            if not tx.verify_signature():
+    
+
+    def is_valid_transaction(self, tx):
+        # Allow system & genesis transactions
+        if tx.from_address in ("system", "genesis"):
+            return True
+
+        # 1) Signature check
+        if not tx.verify_signature():
+            return False
+
+        # 2) Anomaly/ZK only for shielded transactions
+        if isinstance(tx, ShieldedTransaction):
+            if not validate_with_hidden_model(tx, self.zk_vk):
                 return False
-        # anomaly/ZK
-        if not validate_with_hidden_model(tx,self.zk_vk): return False
-        # balance & nonce
-        if tx.from_address not in ("system","genesis"):
-            bal=self.balances.get(tx.from_address,0)
-            if bal<tx.amount+int(tx.amount*COMMISSION_RATE): return False
-            if tx.nonce!=self.nonces.get(tx.from_address,0): return False
+
+        # 3) Balance & nonce
+        fee = int(tx.amount * COMMISSION_RATE)
+        if self.balances.get(tx.from_address, 0) < tx.amount + fee:
+            return False
+        if tx.nonce != self.nonces.get(tx.from_address, 0):
+            return False
+
         return True
+
 
     def is_valid_block(self,blk):
         if not self.chain: return True
@@ -507,6 +532,23 @@ def run_tests():
 
     print("All tests passed.")
 
-if __name__=='__main__':
-    run_tests()
-    print("Tests completed successfully.")
+if __name__ == '__main__':
+    # Inicializo cadena y estado
+    bc = Blockchain(DB_POOL)
+    if not bc.chain:
+        bc.create_genesis_block()
+
+    # Arranco P2P solo si existe esa propiedad
+    if hasattr(bc, "network") and bc.network:
+        bc.network.start()
+        # bc.network.connect_to_peer("localhost", 6001)
+
+    # Bucle de minería continuo
+    print("🔨 Starting continuous mining (CTRL+C to stop)...")
+    try:
+        while True:
+            bc.mine_block()           # imprime cada hash de bloque
+            time.sleep(BLOCK_TIME)
+    except KeyboardInterrupt:
+        print("\n⛔ Mining stopped by user")
+
