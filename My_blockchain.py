@@ -21,8 +21,7 @@ from cryptography.hazmat.primitives import serialization
 from pysnark.runtime import snark, PrivVal
 
 # --- Smart Contracts / EVM ---
-from eth.chains.base import MiningChain
-from eth.vm.forks.berlin import BerlinVM
+
 from web3 import Web3
 
 # --- DB & Environment ---
@@ -198,9 +197,8 @@ class ShieldedTransaction:
         return snark.verify(self.proof, vk)
 
 # --- Blockchain with EVM & P2P ---
-class Blockchain(MiningChain):
+class Blockchain:
     def __init__(self, db_pool):
-        super().__init__(genesis_params={}, genesis_state={})
         self.db_pool = db_pool
         self.chain = []
         self.balances = {}
