@@ -31,7 +31,7 @@ Follow these steps to set up the project on your machine:
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/547atoshinakamo70/547-blockchain
-   cd my_blockchain
+   cd 547-blockchain
 Create a virtual environment (optional but recommended):
 bash
 python3 -m venv env
@@ -218,7 +218,7 @@ If you don’t provide a FERNET_KEY, one will be generated automatically when th
 Usage
 Run the node:
 bash
-python3 blockchain_node.py
+python3 My_blockchain.py
 The node starts a P2P server on localhost:6000.
 The HTTP server runs on localhost:5000.
 It begins mining blocks every 10 seconds (configurable via BLOCK_TIME).
