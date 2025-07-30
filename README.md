@@ -20,6 +20,11 @@ The project includes cryptography with RSA and ECDSA (SECP256k1) keys for signin
 - **Python Dependencies** (listed in `requirements.txt`)
 - **pysnark, libsnark y qaptools** para pruebas de conocimiento cero
 
+If some of these libraries are not available, the code now includes
+lightweight fallbacks so the demo and tests can run without them.
+Database persistence, zero-knowledge proofs and the neural network
+validator will be disabled in this simplified mode.
+
 ## Installation
 
 Follow these steps to set up the project on your machine:
