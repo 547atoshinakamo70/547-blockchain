@@ -271,7 +271,8 @@ class Transaction:
 
     def sign(self, priv_hex):
         if keys:
-            sig = keys.PrivateKey(bytes.fromhex(priv_hex)).sign_msg(self._hash())
+            priv = keys.PrivateKey(bytes.fromhex(priv_hex))
+            sig = priv.sign_msg_hash(self._hash())
             self.signature = sig.to_bytes().hex()
         else:
             priv = bytes.fromhex(priv_hex)
@@ -285,7 +286,7 @@ class Transaction:
         sig_bytes = bytes.fromhex(self.signature)
         if keys:
             sig = keys.Signature(sig_bytes)
-            pub = sig.recover_public_key_from_msg(self._hash())
+            pub = sig.recover_public_key_from_msg_hash(self._hash())
             return derive_address_from_pubkey(pub.to_bytes()) == self.from_address
         else:
             pub = sig_bytes[:32]
