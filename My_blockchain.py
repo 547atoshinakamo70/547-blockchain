@@ -461,13 +461,13 @@ def run_tests():
     assert len(bc.chain)==1
     assert bc.balances[bc.owner_pub]==0
 
-    # signature & simple tx
-    acct=wallet.derive_account()
-    bc.balances[acct['address']]=100*BASE_UNIT
-    tx=Transaction(acct['address'],bc.owner_pub,10*BASE_UNIT,nonce=0)
+    acct = wallet.derive_account()
+    bc.balances[acct['address']] = 100*BASE_UNIT
+    tx = Transaction(acct['address'], bc.owner_pub, 10*BASE_UNIT, nonce=0)
     tx.sign(acct['private_key'])
     assert tx.verify_signature()
     assert bc.is_valid_transaction(tx)
+
 
     # insufficient balance
     poor=wallet.derive_account()
