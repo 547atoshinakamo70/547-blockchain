@@ -18,6 +18,7 @@ from datetime import datetime
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import os
+from web3 import Web3  # Añadido para integración con Ethereum
 
 # Configuración inicial
 load_dotenv()
@@ -25,12 +26,17 @@ BLOCK_TIME = 10
 BLOCK_REWARD_INITIAL = 50
 COMMISSION_RATE = 0.002
 
+# Conexión a Ethereum (usar una red de prueba como Sepolia)
+w3 = Web3(Web3.HTTPProvider('https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID'))  # Reemplaza con tu clave de Infura
+CONTRACT_ADDRESS = "0xYourDeployedContractAddress"  # Reemplaza con la dirección del contrato desplegado
+CONTRACT_ABI = []  # Rellena con el ABI del contrato desplegado en Remix
+
 db_pool = psycopg2.pool.ThreadedConnectionPool(1, 50, dbname="blockchain", user="postgres",
                                                password=os.getenv('DB_PASSWORD'), host="localhost", port="5432")
 FERNET_KEY = os.getenv('FERNET_KEY', Fernet.generate_key().decode()).encode()
 cipher = Fernet(FERNET_KEY)
 
-# Autoencoder
+# Autoencoder (sin cambios)
 autoencoder = tf.keras.Sequential([
     layers.Dense(32, activation='relu', input_shape=(4,)),
     layers.Dense(16, activation='relu'),
@@ -162,21 +168,17 @@ class P2PNetwork:
             except:
                 self.peers.remove(peer)
 
-    def connect_to_peer(self, peer_host, peer_port, retries=5, delay=2):
-        for attempt in range(retries):
-            try:
-                client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client.connect((peer_host, peer_port))
-                self.peers.append(client)
-                threading.Thread(target=self.handle_peer, args=(client,), daemon=True).start()
-                client.send(json.dumps({"type": "GET_CHAIN"}).encode())
-                print(f"Conectado a {peer_host}:{peer_port}")
-               return
-           except ConnectionRefusedError:
-               print(f"Intento {attempt + 1}: No se pudo conectar a {peer_host}:{peer_port}. Reintentando...")
-               time.sleep(delay)
-       print(f"No se pudo conectar a {peer_host}:{peer_port} tras {retries} intentos.")
-       raise ConnectionRefusedError(f"No se pudo conectar a {peer_host}:{peer_port}")
+    def connect_to_peer(self, peer_host, peer_port):
+        try:
+            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client.connect((peer_host, peer_port))
+            self.peers.append(client)
+            threading.Thread(target=self.handle_peer, args=(client,), daemon=True).start()
+            client.send(json.dumps({"type": "GET_CHAIN"}).encode())
+            print(f"Conectado a {peer_host}:{peer_port}")
+        except:
+            print(f"No se pudo conectar a {peer_host}:{peer_port}")
+
 class Blockchain:
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -203,34 +205,17 @@ class Blockchain:
                 cur.execute("SELECT data FROM blockchain ORDER BY index")
                 rows = cur.fetchall()
                 if not rows:
-                    return []  # Devuelve una lista vacía si no hay datos
+                    return []
                 chain = []
                 for row in rows:
                     block_data = row[0]
-                    if isinstance(block_data, str):
-                        block_data = json.loads(block_data)
-                    elif isinstance(block_data, dict):
-                        pass
-                    else:
-                        raise ValueError(f"Tipo de dato inesperado: {type(block_data)}")
                     transactions = [Transaction(**t) for t in block_data["transactions"]]
-                    block = Block(
-                        block_data["index"],
-                        transactions,
-                        block_data["previous_hash"],
-                        block_data["timestamp"]
-                    )
+                    block = Block(block_data["index"], transactions, block_data["previous_hash"],
+                                  block_data["timestamp"])
                     chain.append(block)
-                print(f"Cargados {len(chain)} bloques desde la base de datos.")
-                return chain  # Devuelve la cadena cargada
-        except Exception as e:
-            print(f"Error cargando cadena desde DB: {e}")
-            return []  # Devuelve una lista vacía en caso de error
+                return chain
         finally:
             self.db_pool.putconn(conn)
-       
-
-
 
     def load_balances_from_db(self):
         conn = self.db_pool.getconn()
@@ -293,9 +278,7 @@ class Blockchain:
 
     def is_valid_block(self, block):
         prev_block = self.chain[-1]
-        if block.previous_hash != prev_block.hash or block.hash != block.calculate_hash():
-            return False
-        if block.hash[:4] != '0000':
+        if block.previous_hash != prev_block.hash or block.hash != block.calculate_hash() or block.hash[:4] != '0000':
             return False
         return True
 
@@ -319,6 +302,15 @@ class Blockchain:
         self.network.broadcast({"type": "NEW_BLOCK", "data": new_block.to_dict()})
         print(f"Bloque minado: Índice={new_block.index}, Hash={new_block.hash}")
 
+    # Nueva función para interactuar con el contrato en Ethereum
+    def register_transaction_on_ethereum(self, tx):
+        contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
+        tx_hash = contract.functions.recordTransaction(tx.from_address, tx.to_address, int(tx.amount)).transact({
+            'from': w3.eth.accounts[0],  # Reemplaza con tu dirección
+            'gas': 2000000
+        })
+        print(f"Transacción registrada en Ethereum: {tx_hash.hex()}")
+
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/chain":
@@ -336,28 +328,13 @@ def run_server(port=5000):
     httpd = HTTPServer(server_address, BlockchainHTTPRequestHandler)
     print(f"Iniciando servidor HTTP en el puerto {port}")
     httpd.serve_forever()
-  
-# Crear el pool de conexiones
-db_pool = psycopg2.pool.ThreadedConnectionPool(
-    1,
-    20,
-    dbname="blockchain",# Nombre de tu base de datos
-    user="postgres",    # Usuario de la base de datos
-    password=os.getenv('DB_PASSWORD'),  # Contraseña (obtenida de una variable de entorno)
-    host="localhost",   # Host del servidor
-    port="5432"         # Puerto del servidor
-)
 
 if __name__ == "__main__":
     blockchain = Blockchain(db_pool)
-    chain = blockchain.load_chain_from_db()
     blockchain.network.start()
     server_thread = threading.Thread(target=run_server, kwargs={"port": 5000}, daemon=True)
     server_thread.start()
     print("Servidor HTTP y P2P iniciados")
-
-
-    # Conectar a otro nodo (ejemplo)
     blockchain.network.connect_to_peer("localhost", 6001)
 
     while True:
