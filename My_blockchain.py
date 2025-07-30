@@ -347,6 +347,10 @@ def run_tests():
     tx.sign(acct['private_key'])
     assert tx.verify_signature(), "Signature verification failed"
     assert bc.is_valid_transaction(tx), "Valid transaction marked invalid"
+    d = tx.to_dict()
+    tx2 = Transaction(**d)
+    assert tx2.from_address == tx.from_address
+    assert tx2.to_address == tx.to_address
 
     print("All tests passed.")
 
