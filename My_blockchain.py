@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from urllib import parse
 import sys
 import time
 import json
@@ -482,6 +483,63 @@ class Block:
             'nonce':self.nonce,
             'hash':self.hash
         }
+# --- En el handler HTTP que usas en run_node() ---
+
+class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # 1) Balance
+        if self.path.startswith("/balance"):
+            qs   = parse.urlparse(self.path).query
+            addr = parse.parse_qs(qs).get("address", [""])[0]
+            bal  = blockchain.balances.get(addr, 0)
+            self.send_response(200)
+            self.send_header("Content-Type","application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"address": addr, "balance": bal}).encode())
+            return
+
+        # 2) Chain
+        if self.path == "/chain":
+            chain_data = [b.to_dict() for b in blockchain.chain]
+            self.send_response(200)
+            self.send_header("Content-Type","application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"chain": chain_data}).encode())
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        # 3) Broadcast tx
+        if self.path == "/tx":
+            length = int(self.headers.get("Content-Length",0))
+            data   = json.loads(self.rfile.read(length))
+            # Asegúrate de que las claves del JSON coinciden con los parámetros de Transaction:
+            #   from_address, to_address, amount, nonce, chain_id, data, signature
+            tx = Transaction(
+                from_address = data["from_address"],
+                to_address   = data["to_address"],
+                amount       = data["amount"],
+                nonce        = data["nonce"],
+                chain_id     = data.get("chain_id", CHAIN_ID),
+                data         = bytes.fromhex(data.get("data","")) if data.get("data") else b""
+            )
+            tx.signature = data.get("signature")
+            if blockchain.is_valid_transaction(tx):
+                blockchain.pending_transactions.append(tx)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+            else:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b'{"status":"invalid tx"}')
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
 
 # --- Tests ---
 def run_tests():
