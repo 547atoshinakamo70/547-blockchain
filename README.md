@@ -128,4 +128,5 @@ If you want, I can now **generate this README as a professional PDF with charts*
 * **Yearly emission vs. total supply**
 * **Transaction-fee incentives growth**
 
-Do you want me to generate the **PDF ready to publish**?
+この仮面の下には肉体以上のものがある。
+この仮面の下にはひとつの思想があり、思想は銃弾では貫けない。
