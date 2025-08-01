@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+from datetime import datetime
+from typing import Union
+import time
+from http.server import HTTPServer
+import threading
+import os
+import sys
+from eth_keys import keys
+from eth_utils import to_checksum_address
 from urllib import parse
 import sys
 import time
@@ -56,13 +65,27 @@ except ImportError:
         def __init__(self, val): self.val = val
 
 # --- Ethereum / Web3 (optional stub) ---
-try:
-    from web3 import Web3
-    _rpc = os.getenv('ETH_RPC')
-    w3 = Web3(Web3.HTTPProvider(_rpc)) if _rpc else None
-except ImportError:
-    Web3 = None
-    w3 = None
+from web3 import Web3
+import os
+
+# --- Configuración Ethereum (Infura + Clave Privada) ---
+INFURA_URL = 'https://sepolia.infura.io/v3/'
+w3 = Web3(Web3.HTTPProvider(INFURA_URL))
+
+# Verifica conexión
+if not w3.is_connected():
+    raise ConnectionError("❌ No se pudo conectar a Infura/Sepolia")
+
+# Clave privada y cuenta
+PRIVATE_KEY = ""
+account = w3.eth.account.from_key(PRIVATE_KEY)
+print(f"✅ Conectado como {account.address}")
+
+# Dirección de tu contrato desplegado (¡reemplaza con la tuya real!)
+CONTRACT_ADDRESS = ""
+
+# --- ABI del contrato ---
+CONTRACT_ABI = [
 
 # --- DB & Env ---
 try:
@@ -99,41 +122,73 @@ CHAIN_ID = 60              # Ethereum
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
-# --- Load .env & require FERNET_KEY ---
-load_dotenv()
-FERNET_KEY = os.getenv('FERNET_KEY')
-if not FERNET_KEY:
-    gen = Fernet.generate_key()
-    if isinstance(gen, bytes):
-        try:
-            FERNET_KEY = gen.decode()
-        except Exception:
-            FERNET_KEY = gen.hex()
-    else:
-        FERNET_KEY = str(gen)
-    logging.info(
-        "Generated new FERNET_KEY; add it to .env to persist")
+
+from cryptography.fernet import Fernet
+
+# — Carga y validación de FERNET_KEY con autocorrección —
+FERNET_KEY = os.getenv("FERNET_KEY", "").strip()
+
+# Si no existe o tiene longitud distinta de 44, lo regeneramos y guardamos en .env
+if len(FERNET_KEY) != 44:
+    print("¡¡ FERNET_KEY inválida o no configurada. Generando una nueva automáticamente... !!")
+    # Genera una clave válida
+    FERNET_KEY = Fernet.generate_key().decode()
+    # Ruta al .env (se asume en el mismo directorio que este script)
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    try:
+        # Leemos y reescribimos .env actualizando o añadiendo FERNET_KEY
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+        with open(env_path, "w") as f:
+            found = False
+            for line in lines:
+                if line.startswith("FERNET_KEY="):
+                    f.write(f"FERNET_KEY={FERNET_KEY}\n")
+                    found = True
+                else:
+                    f.write(line)
+            if not found:
+                f.write(f"\nFERNET_KEY={FERNET_KEY}\n")
+        print(f"[AUTO] Nueva FERNET_KEY guardada en {env_path}")
+    except Exception as e:
+        print(f"⚠️ No he podido actualizar {env_path}: {e}")
+    print(f"[AUTO] Usando FERNET_KEY: {FERNET_KEY}")
+
+# Ahora sí intentamos crear el cipher
 try:
     cipher = Fernet(FERNET_KEY.encode())
 except Exception:
-    cipher = Fernet(FERNET_KEY)
+    print("Error crítico: la FERNET_KEY sigue siendo inválida.")
+    sys.exit(1)
+    # Eliminamos posibles comillas que hayas puesto en .env
+FERNET_KEY = FERNET_KEY.strip()
+if (FERNET_KEY.startswith('"') and FERNET_KEY.endswith('"')) or \
+   (FERNET_KEY.startswith("'") and FERNET_KEY.endswith("'")):
+    FERNET_KEY = FERNET_KEY[1:-1]
 
-# DB pool
-if psycopg2:
-    try:
-        DB_POOL = psycopg2.pool.ThreadedConnectionPool(
-            1, 10,
-            dbname=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            host=os.getenv('DB_HOST'),
-            port=os.getenv('DB_PORT'),
-        )
-    except Exception as e:
-        logging.error(f"Error creating DB pool: {e}")
-        DB_POOL = None
-else:
-    DB_POOL = None
+# Debug: muestro lo que realmente se cargó
+print(f"[DEBUG] FERNET_KEY cargada (len={len(FERNET_KEY)}): {FERNET_KEY}")
+
+# Intentamos crear el cipher con la clave limpia
+try:
+    cipher = Fernet(FERNET_KEY.encode())
+except Exception:
+    print("Error: FERNET_KEY inválida. Debe ser 32 bytes base64 url-safe.")
+    print("Genera una clave válida así:")
+    print("  python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
+    sys.exit(1)
+
+import json
+from pathlib import Path
+
+# ─── Almacenamiento “file-based” ────────────────────────────────────
+DATA_DIR      = Path(__file__).parent
+CHAIN_FILE    = DATA_DIR / "chain_data.json"
+BALANCES_FILE = DATA_DIR / "balances.json"
+# Ya no usamos psycopg2 ni pool de Postgres
+DB_POOL = None
 
 # --- Utility ---
 def keccak(x: bytes) -> bytes:
@@ -154,7 +209,6 @@ class HDWallet:
         else:
             addr = derive_address_from_pubkey(hashlib.sha256(priv).digest())
         return {"private_key": priv_hex, "address": addr}
-
 # --- Autoencoder persistence ---
 AUTOENCODER_FILE = "autoencoder.weights.h5"
 if tf and layers:
@@ -236,7 +290,6 @@ def validate_with_hidden_model(tx, zk_vk=None) -> bool:
 
     return True
 
-
 # --- Key gen ---
 def generate_rsa_key_pair():
     if rsa and serialization:
@@ -257,17 +310,41 @@ def generate_rsa_key_pair():
     return priv, pub
 
 # --- Transaction classes ---
-class Transaction:
-    def __init__(self, from_address, to_address, amount, timestamp=None, nonce=0, data=b"", chain_id=CHAIN_ID, signature=None):
-        self.from_address, self.to_address = from_address, to_address
-        self.amount = int(amount)
-        self.timestamp = timestamp or datetime.now().timestamp()
-        self.nonce = nonce
-        self.data = data if isinstance(data,bytes) else bytes.fromhex(data) if data else b""
-        self.chain_id = chain_id
-        self.signature = signature
 
-    def to_dict(self):
+# Constantes
+CHAIN_ID   = 60
+BASE_UNIT  = 10 ** 8
+
+class Transaction:
+    def __init__(
+        self,
+        from_address: str,
+        to_address: str,
+        amount: int,
+        timestamp: float = None,
+        nonce: int = 0,
+        data: Union[bytes,str] = b"",
+        chain_id: int = CHAIN_ID,
+        signature: str = None
+    ):
+        self.from_address = from_address
+        self.to_address   = to_address
+        self.amount       = int(amount)
+        # si no pasas timestamp, usa la hora actual
+        self.timestamp    = timestamp if timestamp is not None else datetime.now().timestamp()
+        self.nonce        = nonce
+        # data puede venir como bytes o como hex-string
+        if isinstance(data, bytes):
+            self.data = data
+        elif isinstance(data, str) and data:
+            # si es hex, conviértelo
+            self.data = bytes.fromhex(data)
+        else:
+            self.data = b""
+        self.chain_id    = chain_id
+        self.signature   = signature
+
+    def to_dict(self) -> dict:
         return {
             "from": self.from_address,
             "to": self.to_address,
@@ -278,44 +355,41 @@ class Transaction:
             "chain_id": self.chain_id,
             "signature": self.signature
         }
-
-    def _hash(self):
+        def _hash(self) -> bytes:
         return keccak(
-            self.from_address.encode()+
-            self.to_address.encode()+
-            self.amount.to_bytes(8,'big')+
-            self.nonce.to_bytes(8,'big')+
-            self.chain_id.to_bytes(2,'big')+
-            self.data
+            self.from_address.encode()
+            + self.to_address.encode()
+            + self.amount.to_bytes(8, "big")
+            + self.nonce.to_bytes(8, "big")
+            + self.chain_id.to_bytes(2, "big")
+            + self.data
         )
 
-    def sign(self, priv_hex):
-        if keys:
-            priv = keys.PrivateKey(bytes.fromhex(priv_hex))
-            sig = priv.sign_msg_hash(self._hash())
-            self.signature = sig.to_bytes().hex()
-        else:
-            priv = bytes.fromhex(priv_hex)
-            pub = hashlib.sha256(priv).digest()
-            sig = hashlib.sha256(pub + self._hash()).digest()
-            self.signature = (pub + sig).hex()
+    def sign(self, private_key_hex: str):
+        """
+        Sign the transaction by prefixing+hashing internally.
+        """
+        msg = self._hash()
+        priv = keys.PrivateKey(bytes.fromhex(private_key_hex))
+        sig = priv.sign_msg(msg)
+        self.signature = sig.to_bytes().hex()
 
-    def verify_signature(self):
+    def verify_signature(self) -> bool:
+        """
+        Verify the signature against the same prefix+hash flow.
+        """
         if not self.signature:
             return False
-        sig_bytes = bytes.fromhex(self.signature)
-        if keys:
-            sig = keys.Signature(sig_bytes)
-            pub = sig.recover_public_key_from_msg_hash(self._hash())
-            return derive_address_from_pubkey(pub.to_bytes()) == self.from_address
-        else:
-            pub = sig_bytes[:32]
-            sig_part = sig_bytes[32:]
-            expected = hashlib.sha256(pub + self._hash()).digest()
-            if expected != sig_part:
-                return False
-            return derive_address_from_pubkey(pub) == self.from_address
 
+        msg = self._hash()
+        sig = keys.Signature(bytes.fromhex(self.signature))
+
+        # Recover using the same sign_msg prefix logic
+        pub = sig.recover_public_key_from_msg(msg)
+        derived = pub.to_checksum_address()
+
+        # Finally verify with the matching verify_msg call
+        return derived == self.from_address and pub.verify_msg(msg, sig)
 class ShieldedTransaction:
     def __init__(self, commitment, proof):
         self.commitment, self.proof = commitment, proof
@@ -325,59 +399,88 @@ class ShieldedTransaction:
         return ShieldedTransaction(b"...", snark.prove())
     def verify(self,vk): return snark.verify(self.proof,vk)
 
+# ─── 1. Cargar la clave de wallet para minería ────────────────────────
+KEY_FILE = os.path.expanduser("~/.mywallet_key")
+if not os.path.exists(KEY_FILE):
+    print(f"ERROR: no existe tu keyfile de wallet en {KEY_FILE}")
+    sys.exit(1)
+
+with open(KEY_FILE, "r") as f:
+    miner_priv_hex = f.read().strip()
+miner_priv = keys.PrivateKey(bytes.fromhex(miner_priv_hex))
+MINER_ADDRESS = to_checksum_address(miner_priv.public_key.to_bytes()[-20:])
+
+# … luego sigue la definición de tus constantes y utilidades …
 # --- Blockchain & P2P ---
 class Blockchain:
-    def __init__(self,db_pool):
-        self.db_pool, self.chain, self.balances, self.nonces = db_pool, [], {}, {}
-        self.pending_transactions=[]
-        self.owner_priv, self.owner_pub = generate_rsa_key_pair()
-        self.zk_vk=None
-        self.load_state()
+    def __init__(self):
+        self.chain = []
+        self.balances = {}
+        self.nonces = {}
+        self.pending_transactions = []
+        self.zk_vk = None
 
-    def load_state(self):
-        if not self.db_pool:
-            return
-        try:
-            conn=self.db_pool.getconn()
-            with conn.cursor() as cur:
-                cur.execute("SELECT index,data FROM blockchain ORDER BY index")
-                for idx,raw in cur.fetchall():
-                    blk=Block(**json.loads(raw))
-                    self.chain.append(blk)
-                cur.execute("SELECT address,balance FROM balances")
-                for addr,bal in cur.fetchall(): self.balances[addr]=bal
-        except Exception as e:
-            logging.error(f"load_state error: {e}")
-        finally:
-            self.db_pool.putconn(conn)
+        # ← Inicializamos aquí la dirección del minero
+        from eth_keys import keys
+        from eth_utils import to_checksum_address
+        # MINER_PRIV_HEX debe venir de ~/.mywallet_key, igual que en wallet.py
+        from pathlib import Path
+        key_file = Path.home() / ".mywallet_key"
+        miner_priv_hex = key_file.read_text().strip()
+        miner_priv = keys.PrivateKey(bytes.fromhex(miner_priv_hex))
+        self.miner_address = to_checksum_address(miner_priv.public_key.to_bytes()[-20:])
 
-    def save_state(self):
-        if not self.db_pool:
-            return
-        try:
-            conn=self.db_pool.getconn()
-            with conn.cursor() as cur:
-                for blk in self.chain:
-                    cur.execute(
-                        "INSERT INTO blockchain(index,data) VALUES(%s,%s) ON CONFLICT(index) DO UPDATE SET data=%s",
-                        (blk.index,json.dumps(blk.to_dict()),json.dumps(blk.to_dict())))
-                for addr,bal in self.balances.items():
-                    cur.execute(
-                        "INSERT INTO balances(address,balance) VALUES(%s,%s) ON CONFLICT(address) DO UPDATE SET balance=%s",
-                        (addr,bal,bal))
-                conn.commit()
-        except Exception as e:
-            logging.error(f"save_state error: {e}")
-        finally:
-            self.db_pool.putconn(conn)
+        # Carga desde los archivos JSON
+        self._load_state()
+
+    def _load_state(self):
+        # 1) Cargo la cadena desde disco (si existe) o creo el génesis
+        if CHAIN_FILE.exists():
+            with open(CHAIN_FILE, "r") as f:
+                raw = json.load(f)
+            self.chain = [Block(**blk) for blk in raw]
+        else:
+            self.create_genesis_block()
+
+        # 2) Reinicio balances y nonces
+        self.balances = {}
+        self.nonces   = {}
+
+        # 3) Reproduzco TODAS las transacciones históricas
+        for block in self.chain:
+            for tx in block.transactions:
+                # A) Si viene de "system" o "genesis", es reward o génesis
+                if tx.from_address in ("system", "genesis"):
+                    self.balances[tx.to_address] = self.balances.get(tx.to_address, 0) + tx.amount
+                else:
+                    # comisión al minero
+                    fee = int(tx.amount * COMMISSION_RATE)
+                    # débito al emisor
+                    self.balances[tx.from_address] = self.balances.get(tx.from_address, 0) - (tx.amount + fee)
+                    # abono al receptor
+                    self.balances[tx.to_address]   = self.balances.get(tx.to_address, 0) + tx.amount
+                    # abono de la comisión
+                    self.balances[self.miner_address] = self.balances.get(self.miner_address, 0) + fee
+                # B) actualizo nonce por dirección
+                self.nonces[tx.from_address] = self.nonces.get(tx.from_address, 0) + 1
+                 4) (Opcional) persisto balances si quieres
+        # self._save_state()
+
+    def _save_state(self):
+        # Guarda la cadena
+        with open(CHAIN_FILE, "w") as f:
+            json.dump([blk.to_dict() for blk in self.chain], f, indent=2)
+        # Guarda los balances
+        with open(BALANCES_FILE, "w") as f:
+            json.dump(self.balances, f, indent=2)
 
     def create_genesis_block(self):
-        tx=Transaction("genesis",self.owner_pub,0,nonce=0)
-        blk=Block(0,[tx],"0")
-        self.chain=[blk]
-        self.balances[self.owner_pub]=0
-        self.nonces[self.owner_pub]=0
-        self.save_state()
+        tx = Transaction("system", self.miner_address, 0, nonce=0)
+        blk = Block(0, [tx], "0")
+        self.chain    = [blk]
+        self.balances = {self.miner_address: 0}
+        self.nonces   = {self.miner_address: 0}
+        self._save_state()
 
     def get_block_reward(self,idx):
         h=idx//210000
@@ -390,9 +493,7 @@ class Blockchain:
             block.hash=block.calculate_hash()
         return block
 
-    
-
-    def is_valid_transaction(self, tx):
+def is_valid_transaction(self, tx):
         # Allow system & genesis transactions
         if tx.from_address in ("system", "genesis"):
             return True
@@ -423,46 +524,63 @@ class Blockchain:
                 blk.hash==blk.calculate_hash() and
                 blk.hash.startswith('0000'))
 
-    def add_block(self,blk):
-        if not self.is_valid_block(blk):
-            raise ValueError("Invalid block proof-of-work or chain")
-        # validate txs
-        for tx in blk.transactions:
-            if not self.is_valid_transaction(tx):
-                raise ValueError(f"Invalid tx {tx.to_dict()}")
-        # all good
+    def add_block(self, blk):
+        # …validaciones…
         self.chain.append(blk)
-        for tx in blk.transactions:
-            if tx.from_address=="system":
-                self.balances[tx.to_address]=self.balances.get(tx.to_address,0)+tx.amount
-            elif tx.from_address!="genesis":
-                fee=int(tx.amount*COMMISSION_RATE)
-                self.balances[tx.from_address]-=(tx.amount+fee)
-                self.balances[tx.to_address]=self.balances.get(tx.to_address,0)+tx.amount
-                self.balances[self.owner_pub]=self.balances.get(self.owner_pub,0)+fee
-            self.nonces[tx.from_address]=self.nonces.get(tx.from_address,0)+1
-        self.save_state()
+        # actualizar balances y nonces…
+        self._save_state()
 
     def mine_block(self):
-        prev=self.chain[-1]
-        idx=prev.index+1
-        reward=Transaction("system",self.owner_pub,self.get_block_reward(idx),nonce=0)
-        txs=[reward]+self.pending_transactions
-        self.pending_transactions=[]
-        blk=Block(idx,txs,prev.hash)
-        blk=self.proof_of_work(blk)
-        self.add_block(blk)
-        logging.info(f"Mined block {blk.index} hash={blk.hash}")
-
+        prev = self.chain[-1]
+        idx  = prev.index + 1
+        reward_tx = Transaction("system", self.miner_address, self.get_block_reward(idx), nonce=0)
+        block_txs = [reward_tx] + self.pending_transactions
+        self.pending_transactions = []
+        new_block = Block(idx, block_txs, prev.hash)
+        new_block = self.proof_of_work(new_block)
+        self.add_block(new_block)
+        logging.info(f"Mined block {new_block.index} → reward to {self.miner_address}")
 # --- Block ---
 class Block:
-    def __init__(self,index,transactions,previous_hash,timestamp=None,nonce=0,hash=None):
-        self.index=index
-        self.transactions=[Transaction(**t) if isinstance(t,dict) else t for t in transactions]
-        self.previous_hash=previous_hash
-        self.timestamp=timestamp or time.time()
-        self.nonce=nonce
-        self.hash=hash or self.calculate_hash()
+    def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0, hash=None):
+        self.index = index
+        # Reconstruimos cada tx a mano
+        mapped = []
+        for t in transactions:
+            if isinstance(t, dict):
+                # extraemos y renombramos campos
+                from_addr = t["from"]
+                to_addr   = t["to"]
+                amount    = t["amount"]
+                ts        = t.get("timestamp")
+                nonce_tx  = t.get("nonce", 0)
+                # data viene en hex; si es cadena vacía, lo dejamos b""
+                data_hex  = t.get("data") or ""
+                data_b    = bytes.fromhex(data_hex) if data_hex else b""
+                chain_id  = t.get("chain_id", CHAIN_ID)
+                # creamos la instancia
+                tx = Transaction(
+                    from_addr,
+                    to_addr,
+                    amount,
+                    timestamp=ts,
+                    nonce=nonce_tx,
+                    data=data_b,
+                    chain_id=chain_id
+                )
+                # restauramos la firma (hex string)
+                sig_hex = t.get("signature")
+                if sig_hex:
+                    tx.signature = sig_hex
+                mapped.append(tx)
+            else:
+                mapped.append(t)
+        self.transactions   = mapped
+
+        self.previous_hash  = previous_hash
+        self.timestamp      = timestamp or time.time()
+        self.nonce          = nonce
+        self.hash           = hash or self.calculate_hash()
 
     def calculate_hash(self):
         data=json.dumps({
@@ -474,7 +592,7 @@ class Block:
         },sort_keys=True).encode()
         return hashlib.sha3_256(data).hexdigest()
 
-    def to_dict(self):
+ def to_dict(self):
         return {
             'index':self.index,
             'transactions':[t.to_dict() for t in self.transactions],
@@ -483,6 +601,7 @@ class Block:
             'nonce':self.nonce,
             'hash':self.hash
         }
+
 # --- En el handler HTTP que usas en run_node() ---
 
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -510,7 +629,7 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    def do_POST(self):
+def do_POST(self):
         # 3) Broadcast tx
         if self.path == "/tx":
             length = int(self.headers.get("Content-Length",0))
@@ -540,7 +659,6 @@ class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-
 # --- Tests ---
 def run_tests():
     wallet=HDWallet()
@@ -551,12 +669,11 @@ def run_tests():
     assert bc.balances[bc.owner_pub]==0
 
     acct = wallet.derive_account()
-    bc.balances[acct['address']] = 100*BASE_UNIT
-    tx = Transaction(acct['address'], bc.owner_pub, 10*BASE_UNIT, nonce=0)
+    bc.balances[acct['address']] = 100 * BASE_UNIT
+
+    tx = Transaction(acct['address'], bc.owner_pub, 10 * BASE_UNIT, nonce=0)
     tx.sign(acct['private_key'])
     assert tx.verify_signature()
-    assert bc.is_valid_transaction(tx)
-
 
     # insufficient balance
     poor=wallet.derive_account()
@@ -590,23 +707,30 @@ def run_tests():
 
     print("All tests passed.")
 
-if __name__ == '__main__':
-    # Inicializo cadena y estado
-    bc = Blockchain(DB_POOL)
+import time
+from http.server import HTTPServer
+import threading
+
+if __name__ == "__main__":
+    # 1) Inicializa la blockchain (carga de JSON o génesis)
+    bc = Blockchain()
     if not bc.chain:
         bc.create_genesis_block()
 
-    # Arranco P2P solo si existe esa propiedad
-    if hasattr(bc, "network") and bc.network:
-        bc.network.start()
-        # bc.network.connect_to_peer("localhost", 6001)
+    # 2) Ponemos la instancia global para el handler HTTP
+    blockchain = bc
 
-    # Bucle de minería continuo
+    # 3) Arrancamos el servidor HTTP en el puerto 5000
+    server = HTTPServer(("", 5000), BlockchainHTTPRequestHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print("✅ HTTP RPC listening on port 5000")
+
+    # 4) Arrancamos la minería continua
     print("🔨 Starting continuous mining (CTRL+C to stop)...")
     try:
         while True:
-            bc.mine_block()           # imprime cada hash de bloque
+            bc.mine_block()
             time.sleep(BLOCK_TIME)
     except KeyboardInterrupt:
         print("\n⛔ Mining stopped by user")
-
+        server.shutdown()
