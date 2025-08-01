@@ -113,11 +113,12 @@ except ImportError:
     layers = None
 
 # --- Constants ---
-BLOCK_TIME = 10
-BLOCK_REWARD_INITIAL = 50
-COMMISSION_RATE = 0.002
-BASE_UNIT = 10 ** 8        # satoshi-like
-CHAIN_ID = 60              # Ethereum
+BASE_UNIT = 10 ** 8        # smallest unit (like satoshi)
+BLOCK_TIME = 10            # seconds per block
+BLOCK_REWARD_INITIAL = int(0.0289 * BASE_UNIT)  # ~0.029 tokens per block
+HALVING_INTERVAL = 210_000 # blocks per halving
+COMMISSION_RATE = 0.002    # 0.2% per transaction
+CHAIN_ID = 60              # Ethereum-style chain ID
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
