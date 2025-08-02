@@ -318,32 +318,18 @@ BASE_UNIT  = 10 ** 8
 
 class Transaction:
     def __init__(
-        self,
-        from_address: str,
-        to_address: str,
-        amount: int,
-        timestamp: float = None,
-        nonce: int = 0,
-        data: Union[bytes,str] = b"",
-        chain_id: int = CHAIN_ID,
-        signature: str = None
-    ):
-        self.from_address = from_address
-        self.to_address   = to_address
-        self.amount       = int(amount)
-        # si no pasas timestamp, usa la hora actual
-        self.timestamp    = timestamp if timestamp is not None else datetime.now().timestamp()
-        self.nonce        = nonce
-        # data puede venir como bytes o como hex-string
-        if isinstance(data, bytes):
-            self.data = data
-        elif isinstance(data, str) and data:
-            # si es hex, conviértelo
-            self.data = bytes.fromhex(data)
-        else:
-            self.data = b""
-        self.chain_id    = chain_id
-        self.signature   = signature
+           def to_dict(self) -> dict:
+        return {
+            "from_address": self.from_address,
+            "to_address": self.to_address,
+            "amount": self.amount,
+            "timestamp": self.timestamp,
+            "nonce": self.nonce,
+            "data": self.data.hex(),
+            "chain_id": self.chain_id,
+            "signature": self.signature
+        }
+
 
     def to_dict(self) -> dict:
         return {
@@ -545,43 +531,51 @@ def is_valid_transaction(self, tx):
 class Block:
     def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0, hash=None):
         self.index = index
-        # Reconstruimos cada tx a mano
-        mapped = []
+        self.transactions = []
+
+        # Reconstruimos transacciones correctamente
         for t in transactions:
             if isinstance(t, dict):
-                # extraemos y renombramos campos
-                from_addr = t["from"]
-                to_addr   = t["to"]
-                amount    = t["amount"]
+                from_addr = t.get("from") or t.get("from_address", "")
+                to_addr   = t.get("to") or t.get("to_address", "")
+                amount    = t.get("amount", 0)
                 ts        = t.get("timestamp")
                 nonce_tx  = t.get("nonce", 0)
-                # data viene en hex; si es cadena vacía, lo dejamos b""
+                
+                # Restaurar data (hex → bytes)
                 data_hex  = t.get("data") or ""
                 data_b    = bytes.fromhex(data_hex) if data_hex else b""
-                chain_id  = t.get("chain_id", CHAIN_ID)
-                # creamos la instancia
-                tx = Transaction(
-                    from_addr,
-                    to_addr,
-                    amount,
-                    timestamp=ts,
-                    nonce=nonce_tx,
-                    data=data_b,
-                    chain_id=chain_id
-                )
-                # restauramos la firma (hex string)
-                sig_hex = t.get("signature")
-                if sig_hex:
-                    tx.signature = sig_hex
-                mapped.append(tx)
-            else:
-                mapped.append(t)
-        self.transactions   = mapped
 
-        self.previous_hash  = previous_hash
-        self.timestamp      = timestamp or time.time()
-        self.nonce          = nonce
-        self.hash           = hash or self.calculate_hash()
+                # Crear transacción
+                tx = Transaction(
+                    from_address = from_addr,
+                    to_address   = to_addr,
+                    amount       = amount,
+                    timestamp    = ts,
+                    nonce        = nonce_tx,
+                    data         = data_b,
+                    chain_id     = t.get("chain_id", CHAIN_ID),
+                    signature    = t.get("signature")
+                )
+                self.transactions.append(tx)
+            else:
+                # Ya es un objeto Transaction
+                self.transactions.append(t)
+
+        self.previous_hash = previous_hash
+        self.timestamp     = timestamp or time.time()
+        self.nonce         = nonce
+        self.hash          = hash or self.calculate_hash()
+
+    def calculate_hash(self):
+        data = json.dumps({
+            'index': self.index,
+            'transactions': [t.to_dict() for t in self.transactions],
+            'timestamp': self.timestamp,
+            'previous_hash': self.previous_hash,
+            'nonce': self.nonce
+        }, sort_keys=True).encode()
+        return hashlib.sha3_256(data).hexdigest()
 
     def calculate_hash(self):
         data=json.dumps({
@@ -607,16 +601,20 @@ class Block:
 
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 1) Balance
-        if self.path.startswith("/balance"):
+               if self.path.startswith("/balance"):
             qs   = parse.urlparse(self.path).query
             addr = parse.parse_qs(qs).get("address", [""])[0]
-            bal  = blockchain.balances.get(addr, 0)
+            bal_sats  = blockchain.balances.get(addr, 0)
+            bal_tokens = bal_sats / BASE_UNIT  # convierte satoshis a tokens
             self.send_response(200)
             self.send_header("Content-Type","application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"address": addr, "balance": bal}).encode())
+            self.wfile.write(json.dumps({
+                "address": addr,
+                "balance": bal_tokens
+            }).encode())
             return
+
 
         # 2) Chain
         if self.path == "/chain":
