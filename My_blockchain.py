@@ -166,7 +166,7 @@ except Exception:
     # Eliminamos posibles comillas que hayas puesto en .env
 FERNET_KEY = FERNET_KEY.strip()
 if (FERNET_KEY.startswith('"') and FERNET_KEY.endswith('"')) or \
-   (FERNET_KEY.startswith("'") and FERNET_KEY.endswith("'")):
+    (FERNET_KEY.startswith("'") and FERNET_KEY.endswith("'")):
     FERNET_KEY = FERNET_KEY[1:-1]
 
 # Debug: muestro lo que realmente se cargó
@@ -318,7 +318,7 @@ BASE_UNIT  = 10 ** 8
 
 class Transaction:
     def __init__(
-           def to_dict(self) -> dict:
+            def to_dict(self) -> dict:
         return {
             "from_address": self.from_address,
             "to_address": self.to_address,
@@ -450,7 +450,7 @@ class Blockchain:
                     self.balances[self.miner_address] = self.balances.get(self.miner_address, 0) + fee
                 # B) actualizo nonce por dirección
                 self.nonces[tx.from_address] = self.nonces.get(tx.from_address, 0) + 1
-                 4) (Opcional) persisto balances si quieres
+                4) (Opcional) persisto balances si quieres
         # self._save_state()
 
     def _save_state(self):
@@ -587,7 +587,7 @@ class Block:
         },sort_keys=True).encode()
         return hashlib.sha3_256(data).hexdigest()
 
- def to_dict(self):
+def to_dict(self):
         return {
             'index':self.index,
             'transactions':[t.to_dict() for t in self.transactions],
@@ -601,7 +601,7 @@ class Block:
 
 class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-               if self.path.startswith("/balance"):
+                if self.path.startswith("/balance"):
             qs   = parse.urlparse(self.path).query
             addr = parse.parse_qs(qs).get("address", [""])[0]
             bal_sats  = blockchain.balances.get(addr, 0)
