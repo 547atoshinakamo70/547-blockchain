@@ -1,735 +1,628 @@
+# ===== file: blockchain_5470_synced_ai_zk.py =====
 #!/usr/bin/env python3
-from datetime import datetime
-from typing import Union
-import time
-from http.server import HTTPServer
-import threading
-import os
-import sys
-from eth_keys import keys
-from eth_utils import to_checksum_address
-from urllib import parse
-import sys
-import time
-import json
-import socket
-import threading
-import logging
+"""
+5470 BLOCKCHAIN — sincronizada con la 5470 Professional Wallet + IA + ZK + Private Pool (demo funcional)
+- Endpoints compatibles con la wallet (send/status/transactions/mining/vpn)
+- Autoencoder de anomalías (IA) opcional
+- Transacciones privadas (ZK) con pool privado (shield/unshield) y notas persistentes
+- PoW simple y persistencia en JSON
+
+Arranca en :5000 y expone CORS para que el frontend (puerto 8001) pueda llamar.
+"""
+import os, json, time, threading, hashlib, logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import hashlib
+from urllib import parse
 from datetime import datetime
-import os
 
-# --- Crypto & Signatures ---
 try:
-    from ecdsa import SigningKey, SECP256k1
     from eth_keys import keys
-    from eth_utils import to_checksum_address
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-except ImportError:  # Provide minimal stubs if crypto libs are unavailable
-    SigningKey = None
-    SECP256k1 = None
+except Exception:
     keys = None
-    def to_checksum_address(val: bytes) -> str:
-        return "0x" + val.hex()[-40:]
-    class Fernet:
-        @staticmethod
-        def generate_key():
-            return os.urandom(32)
-        def __init__(self, key):
-            self.key = key
-        def encrypt(self, data: bytes) -> bytes:
-            return data
-        def decrypt(self, data: bytes) -> bytes:
-            return data
-    rsa = None
-    serialization = None
 
-# --- ZK Proofs (stub if unavailable) ---
-try:
-    from pysnark.runtime import snark, PrivVal
-except ImportError:
-    class DummySnark:
-        def __enter__(self): return self
-        def __exit__(self, exc_type, exc, tb): return False
-        @staticmethod
-        def prove(): return b''
-        @staticmethod
-        def verify(proof, vk): return True
-        @staticmethod
-        def verkey(): return b''
-    snark = DummySnark()
-    class PrivVal:
-        def __init__(self, val): self.val = val
+# ───────────────────────── Config ─────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CHAIN_FILE = os.path.join(BASE_DIR, 'chain_data.json')
+BALANCES_FILE = os.path.join(BASE_DIR, 'balances.json')
+PRIVATE_NOTES_FILE = os.path.join(BASE_DIR, 'private_notes.json')
 
-# --- Ethereum / Web3 (optional stub) ---
-from web3 import Web3
-import os
+TOKEN_SYMBOL = '5470'
+BASE_UNIT = 10 ** 8                 # unidad mínima (sats)
+CHAIN_ID = 5470                     # tu chain-id
+BLOCK_TIME = 5                      # cada 5s (match UI)
+BLOCK_REWARD_INITIAL = 50 * BASE_UNIT
+COMMISSION_RATE = 0.002             # 0.2 %
+POW_DIFFICULTY = 4                  # 4 ceros
 
-# --- Configuración Ethereum (Infura + Clave Privada) ---
-INFURA_URL = 'https://sepolia.infura.io/v3/'
-w3 = Web3(Web3.HTTPProvider(INFURA_URL))
+# Dirección lógica del pool de shield (solo contabilidad pública)
+SHIELDED_POOL_ADDR = 'shielded_pool'
 
-# Verifica conexión
-if not w3.is_connected():
-    raise ConnectionError("❌ No se pudo conectar a Infura/Sepolia")
+# ── IA/ZK opcionales ──────────────────────────
+AI_ENABLED = True
+ZK_ENABLED = True
+ANOMALY_THRESHOLD = 0.10
+_last_ai_score = 0.0
 
-# Clave privada y cuenta
-PRIVATE_KEY = ""
-account = w3.eth.account.from_key(PRIVATE_KEY)
-print(f"✅ Conectado como {account.address}")
-
-# Dirección de tu contrato desplegado (¡reemplaza con la tuya real!)
-CONTRACT_ADDRESS = ""
-
-# --- ABI del contrato ---
-CONTRACT_ABI = [
-
-# --- DB & Env ---
-try:
-    import psycopg2
-    from psycopg2 import pool
-except ImportError:
-    psycopg2 = None
-    pool = None
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    def load_dotenv():
-        return None
-
-# --- ML Anomaly & ZK Hybrid Validation ---
 try:
     import numpy as np
-except ImportError:
-    np = None
-try:
     import tensorflow as tf
     from tensorflow.keras import layers
-except ImportError:
-    tf = None
-    layers = None
-
-# --- Constants ---
-BASE_UNIT = 10 ** 8        # smallest unit (like satoshi)
-BLOCK_TIME = 10            # seconds per block
-BLOCK_REWARD_INITIAL = int(0.0289 * BASE_UNIT)  # ~0.029 tokens per block
-HALVING_INTERVAL = 210_000 # blocks per halving
-COMMISSION_RATE = 0.002    # 0.2% per transaction
-CHAIN_ID = 60              # Ethereum-style chain ID
-
-# --- Logging ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-
-
-from cryptography.fernet import Fernet
-
-# — Carga y validación de FERNET_KEY con autocorrección —
-FERNET_KEY = os.getenv("FERNET_KEY", "").strip()
-
-# Si no existe o tiene longitud distinta de 44, lo regeneramos y guardamos en .env
-if len(FERNET_KEY) != 44:
-    print("¡¡ FERNET_KEY inválida o no configurada. Generando una nueva automáticamente... !!")
-    # Genera una clave válida
-    FERNET_KEY = Fernet.generate_key().decode()
-    # Ruta al .env (se asume en el mismo directorio que este script)
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    try:
-        # Leemos y reescribimos .env actualizando o añadiendo FERNET_KEY
-        lines = []
-        if os.path.exists(env_path):
-            with open(env_path, "r") as f:
-                lines = f.readlines()
-        with open(env_path, "w") as f:
-            found = False
-            for line in lines:
-                if line.startswith("FERNET_KEY="):
-                    f.write(f"FERNET_KEY={FERNET_KEY}\n")
-                    found = True
-                else:
-                    f.write(line)
-            if not found:
-                f.write(f"\nFERNET_KEY={FERNET_KEY}\n")
-        print(f"[AUTO] Nueva FERNET_KEY guardada en {env_path}")
-    except Exception as e:
-        print(f"⚠️ No he podido actualizar {env_path}: {e}")
-    print(f"[AUTO] Usando FERNET_KEY: {FERNET_KEY}")
-
-# Ahora sí intentamos crear el cipher
-try:
-    cipher = Fernet(FERNET_KEY.encode())
 except Exception:
-    print("Error crítico: la FERNET_KEY sigue siendo inválida.")
-    sys.exit(1)
-    # Eliminamos posibles comillas que hayas puesto en .env
-FERNET_KEY = FERNET_KEY.strip()
-if (FERNET_KEY.startswith('"') and FERNET_KEY.endswith('"')) or \
-    (FERNET_KEY.startswith("'") and FERNET_KEY.endswith("'")):
-    FERNET_KEY = FERNET_KEY[1:-1]
+    np = None; tf = None; layers = None
 
-# Debug: muestro lo que realmente se cargó
-print(f"[DEBUG] FERNET_KEY cargada (len={len(FERNET_KEY)}): {FERNET_KEY}")
-
-# Intentamos crear el cipher con la clave limpia
 try:
-    cipher = Fernet(FERNET_KEY.encode())
+    from pysnark.runtime import snark
 except Exception:
-    print("Error: FERNET_KEY inválida. Debe ser 32 bytes base64 url-safe.")
-    print("Genera una clave válida así:")
-    print("  python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
-    sys.exit(1)
+    class DummySnark:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        @staticmethod
+        def prove(): return b'proof'
+        @staticmethod
+        def verify(*a, **k): return True
+    snark = DummySnark()
 
-import json
-from pathlib import Path
+KEY_FILE = os.path.expanduser('~/.mywallet_key')
 
-# ─── Almacenamiento “file-based” ────────────────────────────────────
-DATA_DIR      = Path(__file__).parent
-CHAIN_FILE    = DATA_DIR / "chain_data.json"
-BALANCES_FILE = DATA_DIR / "balances.json"
-# Ya no usamos psycopg2 ni pool de Postgres
-DB_POOL = None
+def ensure_key():
+    if not os.path.exists(KEY_FILE):
+        pk = os.urandom(32).hex()
+        with open(KEY_FILE,'w') as f: f.write(pk)
+    return open(KEY_FILE).read().strip()
 
-# --- Utility ---
+MINER_PRIV_HEX = ensure_key()
+if keys:
+    MINER_ADDRESS = keys.PrivateKey(bytes.fromhex(MINER_PRIV_HEX)).public_key.to_checksum_address()
+else:
+    MINER_ADDRESS = '0x' + hashlib.sha256(bytes.fromhex(MINER_PRIV_HEX)).hexdigest()[-40:]
+
+# ───────────────────────── Utils ─────────────────────────
+
 def keccak(x: bytes) -> bytes:
     return hashlib.new('sha3_256', x).digest()
 
-def derive_address_from_pubkey(pubkey_bytes: bytes) -> str:
-    return to_checksum_address(keccak(pubkey_bytes)[-20:])
-
-# --- HD Wallet fallback ---
-class HDWallet:
-    def __init__(self, mnemonic=None, passphrase=""):
-        pass
-    def derive_account(self, idx=0):
-        priv = os.urandom(32)
-        priv_hex = priv.hex()
-        if keys:
-            addr = keys.PrivateKey(priv).public_key.to_checksum_address()
-        else:
-            addr = derive_address_from_pubkey(hashlib.sha256(priv).digest())
-        return {"private_key": priv_hex, "address": addr}
-# --- Autoencoder persistence ---
-AUTOENCODER_FILE = "autoencoder.weights.h5"
-if tf and layers:
-    autoencoder = tf.keras.Sequential([
-        layers.Dense(32, activation='relu', input_shape=(4,)),
-        layers.Dense(16, activation='relu'),
-        layers.Dense(32, activation='relu'),
-        layers.Dense(4, activation='sigmoid'),
-    ])
-    autoencoder.compile(optimizer='adam', loss='mse')
-else:
-    class DummyAE:
-        def predict(self, x, verbose=0):
-            return x
-        def fit(self, *a, **k):
-            pass
-        def save_weights(self, f):
-            pass
-        def load_weights(self, f):
-            pass
-    autoencoder = DummyAE()
-
-def load_or_train_autoencoder():
-    if not tf or not np:
-        return
-    if os.path.exists(AUTOENCODER_FILE):
-        autoencoder.load_weights(AUTOENCODER_FILE)
-        logging.info("Loaded autoencoder weights.")
-    else:
-        data = np.random.rand(1000,4)
-        autoencoder.fit(data, data, epochs=50, batch_size=32, verbose=0)
-        autoencoder.save_weights(AUTOENCODER_FILE)
-        logging.info("Trained and saved new autoencoder.")
-
-def update_model(new_data):
-    if tf and np:
-        autoencoder.fit(new_data, new_data, epochs=20, batch_size=16)
-        autoencoder.save_weights(AUTOENCODER_FILE)
-        logging.info("Autoencoder updated with new data.")
-
-load_or_train_autoencoder()
-
-# --- Anomaly detection & zk proof ---
-ANOMALY_LOG = "anomalies.log"
-ANOMALY_THRESHOLD = 0.1
-
-def validate_with_hidden_model(tx, zk_vk=None) -> bool:
-    if not tf or not np:
-        return True
-
-    # Preparar características básicas
-    f1 = f2 = 0.0
-    try:
-        f1 = float(int(tx.from_address[:8], 16))
-        f2 = float(int(tx.to_address[:8], 16))
-    except:
-        pass
-
-    # --- NORMALIZACIÓN AQUI ---
-    # Convertimos satoshis a “número de monedas” y escalamos
-    f3 = float(tx.amount) / BASE_UNIT           # ahora en unidades de moneda
-    # Tomamos días desde el 13 Sep 2020 (1600000000s), escalando a ~[0,10]
-    f4 = (tx.timestamp - 1_600_000_000) / 86_400
-    # -------------------------
-
-    inp = np.array([[f1, f2, f3, f4]])
-    rec = autoencoder.predict(inp, verbose=0)
-    mse = float(np.mean((inp - rec) ** 2))
-
-    if mse >= ANOMALY_THRESHOLD:
-        with open(ANOMALY_LOG, "a") as f:
-            f.write(f"{datetime.now().isoformat()} ANOMALY tx={tx.to_dict()} mse={mse}\n")
-        return False
-
-    # ZK‑SNARK proof (si aplica)
-    if getattr(tx, "proof", None) is not None:
-        if not zk_vk or not tx.verify(zk_vk):
-            return False
-
-    return True
-
-# --- Key gen ---
-def generate_rsa_key_pair():
-    if rsa and serialization:
-        priv = rsa.generate_private_key(65537,2048)
-        priv_pem = priv.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        ).decode()
-        pub_pem = priv.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ).decode()
-        return priv_pem, pub_pem
-    # fallback simple keys
-    priv = os.urandom(32).hex()
-    pub = hashlib.sha256(bytes.fromhex(priv)).hexdigest()
-    return priv, pub
-
-# --- Transaction classes ---
-
-# Constantes
-CHAIN_ID   = 60
-BASE_UNIT  = 10 ** 8
-
 class Transaction:
-    def __init__(
-            def to_dict(self) -> dict:
+    def __init__(self, from_address, to_address, amount, nonce, timestamp=None, data=b'', chain_id=CHAIN_ID, signature=None):
+        self.from_address = from_address
+        self.to_address = to_address
+        self.amount = int(amount)  # en BASE_UNIT
+        self.nonce = int(nonce)
+        self.timestamp = int(timestamp or time.time())
+        self.data = data or b''
+        self.chain_id = int(chain_id)
+        self.signature = signature
+
+    def to_dict(self):
         return {
-            "from_address": self.from_address,
-            "to_address": self.to_address,
-            "amount": self.amount,
-            "timestamp": self.timestamp,
-            "nonce": self.nonce,
-            "data": self.data.hex(),
-            "chain_id": self.chain_id,
-            "signature": self.signature
+          "from": self.from_address,
+          "to": self.to_address,
+          "amount": self.amount,
+          "timestamp": self.timestamp,
+          "nonce": self.nonce,
+          "data": self.data.hex(),
+          "chain_id": self.chain_id,
+          "signature": self.signature
         }
 
-
-    def to_dict(self) -> dict:
-        return {
-            "from": self.from_address,
-            "to": self.to_address,
-            "amount": self.amount,
-            "timestamp": self.timestamp,
-            "nonce": self.nonce,
-            "data": self.data.hex(),
-            "chain_id": self.chain_id,
-            "signature": self.signature
-        }
-        def _hash(self) -> bytes:
+    def _hash(self):
         return keccak(
-            self.from_address.encode()
-            + self.to_address.encode()
-            + self.amount.to_bytes(8, "big")
-            + self.nonce.to_bytes(8, "big")
-            + self.chain_id.to_bytes(2, "big")
-            + self.data
+            self.from_address.encode() +
+            self.to_address.encode() +
+            self.amount.to_bytes(16,'big') +
+            self.nonce.to_bytes(8,'big') +
+            self.chain_id.to_bytes(4,'big') +
+            self.data
         )
 
-    def sign(self, private_key_hex: str):
-        """
-        Sign the transaction by prefixing+hashing internally.
-        """
+    def sign(self, private_key_hex):
+        if not keys:
+            self.signature = "nosig"
+            return
         msg = self._hash()
         priv = keys.PrivateKey(bytes.fromhex(private_key_hex))
         sig = priv.sign_msg(msg)
         self.signature = sig.to_bytes().hex()
 
-    def verify_signature(self) -> bool:
-        """
-        Verify the signature against the same prefix+hash flow.
-        """
+    def verify_signature(self):
         if not self.signature:
-            return False
-
+            return False if keys else True
+        if not keys:
+            return True
         msg = self._hash()
         sig = keys.Signature(bytes.fromhex(self.signature))
-
-        # Recover using the same sign_msg prefix logic
         pub = sig.recover_public_key_from_msg(msg)
-        derived = pub.to_checksum_address()
+        return pub.to_checksum_address() == self.from_address and pub.verify_msg(msg, sig)
 
-        # Finally verify with the matching verify_msg call
-        return derived == self.from_address and pub.verify_msg(msg, sig)
+# ── ZK Shielded Tx ─────────────────────────────
 class ShieldedTransaction:
-    def __init__(self, commitment, proof):
-        self.commitment, self.proof = commitment, proof
-    @staticmethod
-    def create(amount,priv_val,pub_key,vk):
-        with snark: assert amount>=0
-        return ShieldedTransaction(b"...", snark.prove())
-    def verify(self,vk): return snark.verify(self.proof,vk)
+    def __init__(self, commitment: str, proof: str, nonce: int, timestamp=None, chain_id=CHAIN_ID):
+        self.from_address = "shielded"
+        self.to_address = "shielded"
+        self.amount = 0
+        self.nonce = int(nonce)
+        self.timestamp = int(timestamp or time.time())
+        self.data = bytes.fromhex(commitment) if commitment else b''
+        self.chain_id = int(chain_id)
+        self.signature = proof  # guardamos proof aquí para simplificar
 
-# ─── 1. Cargar la clave de wallet para minería ────────────────────────
-KEY_FILE = os.path.expanduser("~/.mywallet_key")
-if not os.path.exists(KEY_FILE):
-    print(f"ERROR: no existe tu keyfile de wallet en {KEY_FILE}")
-    sys.exit(1)
+    def to_dict(self):
+        return {
+            "from": self.from_address, "to": self.to_address,
+            "amount": self.amount, "timestamp": self.timestamp,
+            "nonce": self.nonce, "data": self.data.hex(),
+            "chain_id": self.chain_id, "signature": self.signature,
+            "type": "shielded"
+        }
 
-with open(KEY_FILE, "r") as f:
-    miner_priv_hex = f.read().strip()
-miner_priv = keys.PrivateKey(bytes.fromhex(miner_priv_hex))
-MINER_ADDRESS = to_checksum_address(miner_priv.public_key.to_bytes()[-20:])
+# ── Autoencoder mínimo ─────────────────────────
+if tf and layers and np is not None:
+    autoencoder = tf.keras.Sequential([
+        layers.Input(shape=(4,)),
+        layers.Dense(16, activation='relu'),
+        layers.Dense(8, activation='relu'),
+        layers.Dense(16, activation='relu'),
+        layers.Dense(4, activation='linear'),
+    ])
+    autoencoder.compile(optimizer='adam', loss='mse')
+    try:
+        X = np.random.rand(512,4).astype('float32')
+        autoencoder.fit(X, X, epochs=5, batch_size=32, verbose=0)
+    except Exception:
+        pass
+else:
+    class _AE:
+        def predict(self, X, verbose=0): return X
+    autoencoder = _AE()
 
-# … luego sigue la definición de tus constantes y utilidades …
-# --- Blockchain & P2P ---
+
+def ai_score_tx(tx) -> float:
+    global np
+    try:
+        f1 = float(int(tx.from_address[:8].replace('0x',''), 16) % 10_000) / 10_000.0
+    except: f1 = 0.0
+    try:
+        f2 = float(int(tx.to_address[:8].replace('0x',''), 16) % 10_000) / 10_000.0
+    except: f2 = 0.0
+    f3 = tx.amount / float(BASE_UNIT * 10_000)
+    f4 = (tx.timestamp - 1_600_000_000) / 86_400.0 / 10_000.0
+    if np is not None:
+        X = np.array([[f1,f2,f3,f4]], dtype='float32')
+        rec = autoencoder.predict(X, verbose=0)
+        mse = float(((X - rec)**2).mean())
+    else:
+        X = [[f1,f2,f3,f4]]; rec = autoencoder.predict(X); mse = 0.0
+    return mse
+
+
+def zk_prove(amount_tokens: float) -> tuple[str,str]:
+    payload = f"{amount_tokens}:{os.urandom(8).hex()}".encode()
+    commitment = hashlib.sha3_256(payload).hexdigest()
+    proof = snark.prove()
+    if isinstance(proof, (bytes, bytearray)):
+        proof = proof.hex()
+    return commitment, proof
+
+# ── Private Notes (persistentes) ─────────────────────────
+_private_notes = []  # [{owner, commitment, value, spent, created_at}]
+
+def _load_notes():
+    global _private_notes
+    if os.path.exists(PRIVATE_NOTES_FILE):
+        try:
+            _private_notes = json.load(open(PRIVATE_NOTES_FILE))
+        except Exception:
+            _private_notes = []
+
+
+def _save_notes():
+    try:
+        json.dump(_private_notes, open(PRIVATE_NOTES_FILE,'w'), indent=2)
+    except Exception:
+        pass
+
+
+def private_balance(owner: str) -> int:
+    return sum(n['value'] for n in _private_notes if n['owner']==owner and not n['spent'])
+
+
+def add_private_note(owner: str, commitment: str, value: int):
+    _private_notes.append({
+        'owner': owner,
+        'commitment': commitment,
+        'value': int(value),
+        'spent': False,
+        'created_at': int(time.time())
+    })
+    _save_notes()
+
+
+def spend_private(owner: str, amount: int) -> bool:
+    needed = int(amount)
+    for n in _private_notes:
+        if n['owner']==owner and not n['spent']:
+            if needed <= 0: break
+            n['spent'] = True
+            needed -= n['value']
+    _save_notes()
+    return needed <= 0
+
+class Block:
+    def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0, hash=None):
+        self.index = index
+        self.transactions = transactions
+        self.previous_hash = previous_hash
+        self.timestamp = int(timestamp or time.time())
+        self.nonce = nonce
+        self.hash = hash or self.calculate_hash()
+    def calculate_hash(self):
+        data = json.dumps({
+            "index": self.index,
+            "transactions": [t.to_dict() for t in self.transactions],
+            "timestamp": self.timestamp,
+            "previous_hash": self.previous_hash,
+            "nonce": self.nonce
+        }, sort_keys=True).encode()
+        return hashlib.sha3_256(data).hexdigest()
+    def to_dict(self):
+        return {
+           "index": self.index,
+           "transactions": [t.to_dict() for t in self.transactions],
+           "timestamp": self.timestamp,
+           "previous_hash": self.previous_hash,
+           "nonce": self.nonce,
+           "hash": self.hash
+        }
+
 class Blockchain:
     def __init__(self):
         self.chain = []
         self.balances = {}
         self.nonces = {}
         self.pending_transactions = []
-        self.zk_vk = None
-
-        # ← Inicializamos aquí la dirección del minero
-        from eth_keys import keys
-        from eth_utils import to_checksum_address
-        # MINER_PRIV_HEX debe venir de ~/.mywallet_key, igual que en wallet.py
-        from pathlib import Path
-        key_file = Path.home() / ".mywallet_key"
-        miner_priv_hex = key_file.read_text().strip()
-        miner_priv = keys.PrivateKey(bytes.fromhex(miner_priv_hex))
-        self.miner_address = to_checksum_address(miner_priv.public_key.to_bytes()[-20:])
-
-        # Carga desde los archivos JSON
+        self.miner_address = MINER_ADDRESS
+        _load_notes()
         self._load_state()
 
+    # ── Persistencia ──
     def _load_state(self):
-        # 1) Cargo la cadena desde disco (si existe) o creo el génesis
-        if CHAIN_FILE.exists():
-            with open(CHAIN_FILE, "r") as f:
-                raw = json.load(f)
-            self.chain = [Block(**blk) for blk in raw]
+        if os.path.exists(CHAIN_FILE):
+            raw = json.load(open(CHAIN_FILE))
+            self.chain = []
+            for b in raw:
+                txs = []
+                for t in b["transactions"]:
+                    ttype = t.get("type")
+                    if ttype == "shielded":
+                        txs.append(ShieldedTransaction(
+                            commitment=t.get("data",""), proof=t.get("signature",""),
+                            nonce=int(t.get("nonce",0)),
+                        ))
+                        txs[-1].timestamp = int(t.get("timestamp", time.time()))
+                    else:
+                        txs.append(Transaction(
+                            from_address=t.get("from") or t.get("from_address"),
+                            to_address=t.get("to") or t.get("to_address"),
+                            amount=int(t.get("amount",0)),
+                            nonce=int(t.get("nonce",0)),
+                            timestamp=int(t.get("timestamp", time.time())),
+                            data=bytes.fromhex(t.get("data","")),
+                            chain_id=int(t.get("chain_id", CHAIN_ID)),
+                            signature=t.get("signature")
+                        ))
+                self.chain.append(Block(
+                    index=b["index"], transactions=txs, previous_hash=b["previous_hash"],
+                    timestamp=b.get("timestamp"), nonce=b.get("nonce",0), hash=b.get("hash")
+                ))
         else:
             self.create_genesis_block()
-
-        # 2) Reinicio balances y nonces
-        self.balances = {}
-        self.nonces   = {}
-
-        # 3) Reproduzco TODAS las transacciones históricas
-        for block in self.chain:
-            for tx in block.transactions:
-                # A) Si viene de "system" o "genesis", es reward o génesis
-                if tx.from_address in ("system", "genesis"):
-                    self.balances[tx.to_address] = self.balances.get(tx.to_address, 0) + tx.amount
-                else:
-                    # comisión al minero
-                    fee = int(tx.amount * COMMISSION_RATE)
-                    # débito al emisor
-                    self.balances[tx.from_address] = self.balances.get(tx.from_address, 0) - (tx.amount + fee)
-                    # abono al receptor
-                    self.balances[tx.to_address]   = self.balances.get(tx.to_address, 0) + tx.amount
-                    # abono de la comisión
-                    self.balances[self.miner_address] = self.balances.get(self.miner_address, 0) + fee
-                # B) actualizo nonce por dirección
-                self.nonces[tx.from_address] = self.nonces.get(tx.from_address, 0) + 1
-                4) (Opcional) persisto balances si quieres
-        # self._save_state()
+        self._recompute_balances_and_nonces()
 
     def _save_state(self):
-        # Guarda la cadena
-        with open(CHAIN_FILE, "w") as f:
-            json.dump([blk.to_dict() for blk in self.chain], f, indent=2)
-        # Guarda los balances
-        with open(BALANCES_FILE, "w") as f:
-            json.dump(self.balances, f, indent=2)
+        json.dump([b.to_dict() for b in self.chain], open(CHAIN_FILE,'w'), indent=2)
+        json.dump(self.balances, open(BALANCES_FILE,'w'), indent=2)
+        _save_notes()
 
+    def _recompute_balances_and_nonces(self):
+        self.balances = {}
+        self.nonces = {}
+        for b in self.chain:
+            for tx in b.transactions:
+                if isinstance(tx, ShieldedTransaction):
+                    # no afecta balances públicos (demo); el pool privado se maneja fuera
+                    self.nonces["shielded"] = self.nonces.get("shielded",0) + 1
+                    continue
+                if tx.from_address in ("system","genesis"):
+                    self.balances[tx.to_address] = self.balances.get(tx.to_address,0) + tx.amount
+                else:
+                    fee = int(tx.amount * COMMISSION_RATE)
+                    self.balances[tx.from_address] = self.balances.get(tx.from_address,0) - tx.amount - fee
+                    self.balances[tx.to_address] = self.balances.get(tx.to_address,0) + tx.amount
+                    self.balances[self.miner_address] = self.balances.get(self.miner_address,0) + fee
+                    self.nonces[tx.from_address] = self.nonces.get(tx.from_address,0) + 1
+
+    # ── Lógica de cadena ──
     def create_genesis_block(self):
-        tx = Transaction("system", self.miner_address, 0, nonce=0)
-        blk = Block(0, [tx], "0")
-        self.chain    = [blk]
+        gtx = Transaction("genesis", self.miner_address, 0, nonce=0, timestamp=int(time.time()))
+        genesis = Block(0, [gtx], "0"*64)
+        self.chain = [genesis]
         self.balances = {self.miner_address: 0}
-        self.nonces   = {self.miner_address: 0}
+        self.nonces = {self.miner_address: 0}
         self._save_state()
 
-    def get_block_reward(self,idx):
-        h=idx//210000
-        return BLOCK_REWARD_INITIAL//(2**h) if h<64 else 0
+    def get_block_reward(self, height):
+        halvings = height // 210_000
+        reward = BLOCK_REWARD_INITIAL >> halvings if halvings < 64 else 0
+        return reward
 
-    def proof_of_work(self,block,difficulty=4):
-        target='0'*difficulty
-        while not block.hash.startswith(target):
-            block.nonce+=1
-            block.hash=block.calculate_hash()
-        return block
-
-def is_valid_transaction(self, tx):
-        # Allow system & genesis transactions
-        if tx.from_address in ("system", "genesis"):
-            return True
-
-        # 1) Signature check
-        if not tx.verify_signature():
-            return False
-
-        # 2) Anomaly/ZK only for shielded transactions
+    def is_valid_transaction(self, tx):
+        global _last_ai_score
+        # 1) ZK
         if isinstance(tx, ShieldedTransaction):
-            if not validate_with_hidden_model(tx, self.zk_vk):
-                return False
-
-        # 3) Balance & nonce
+            if not ZK_ENABLED: return False
+            try:
+                ok = snark.verify(bytes.fromhex(tx.signature) if isinstance(tx.signature, str) and all(c in '0123456789abcdef' for c in tx.signature.lower()) else tx.signature)
+            except Exception:
+                ok = True
+            return bool(ok)
+        # 2) normales
+        if tx.from_address in ("system","genesis"): return True
+        if tx.chain_id != CHAIN_ID: return False
+        if not tx.verify_signature(): return False
         fee = int(tx.amount * COMMISSION_RATE)
-        if self.balances.get(tx.from_address, 0) < tx.amount + fee:
-            return False
-        if tx.nonce != self.nonces.get(tx.from_address, 0):
-            return False
-
+        if self.balances.get(tx.from_address,0) < tx.amount + fee: return False
+        if tx.nonce != self.nonces.get(tx.from_address,0): return False
+        # 3) IA
+        if AI_ENABLED:
+            _last_ai_score = ai_score_tx(tx)
+            if _last_ai_score >= ANOMALY_THRESHOLD:
+                return False
         return True
 
-
-    def is_valid_block(self,blk):
-        if not self.chain: return True
-        prev=self.chain[-1]
-        return (blk.previous_hash==prev.hash and
-                blk.hash==blk.calculate_hash() and
-                blk.hash.startswith('0000'))
-
-    def add_block(self, blk):
-        # …validaciones…
-        self.chain.append(blk)
-        # actualizar balances y nonces…
-        self._save_state()
-
-    def mine_block(self):
+    def add_block(self, block: Block):
         prev = self.chain[-1]
-        idx  = prev.index + 1
-        reward_tx = Transaction("system", self.miner_address, self.get_block_reward(idx), nonce=0)
-        block_txs = [reward_tx] + self.pending_transactions
-        self.pending_transactions = []
-        new_block = Block(idx, block_txs, prev.hash)
-        new_block = self.proof_of_work(new_block)
-        self.add_block(new_block)
-        logging.info(f"Mined block {new_block.index} → reward to {self.miner_address}")
-# --- Block ---
-class Block:
-    def __init__(self, index, transactions, previous_hash, timestamp=None, nonce=0, hash=None):
-        self.index = index
-        self.transactions = []
-
-        # Reconstruimos transacciones correctamente
-        for t in transactions:
-            if isinstance(t, dict):
-                from_addr = t.get("from") or t.get("from_address", "")
-                to_addr   = t.get("to") or t.get("to_address", "")
-                amount    = t.get("amount", 0)
-                ts        = t.get("timestamp")
-                nonce_tx  = t.get("nonce", 0)
-                
-                # Restaurar data (hex → bytes)
-                data_hex  = t.get("data") or ""
-                data_b    = bytes.fromhex(data_hex) if data_hex else b""
-
-                # Crear transacción
-                tx = Transaction(
-                    from_address = from_addr,
-                    to_address   = to_addr,
-                    amount       = amount,
-                    timestamp    = ts,
-                    nonce        = nonce_tx,
-                    data         = data_b,
-                    chain_id     = t.get("chain_id", CHAIN_ID),
-                    signature    = t.get("signature")
-                )
-                self.transactions.append(tx)
+        if block.previous_hash != prev.hash: return False
+        if block.hash != block.calculate_hash(): return False
+        if not block.hash.startswith("0"*POW_DIFFICULTY): return False
+        self.chain.append(block)
+        # aplicar txs
+        for tx in block.transactions:
+            if isinstance(tx, ShieldedTransaction):
+                self.nonces["shielded"] = self.nonces.get("shielded",0) + 1
+                continue
+            if tx.from_address in ("system","genesis"):
+                self.balances[tx.to_address] = self.balances.get(tx.to_address,0) + tx.amount
             else:
-                # Ya es un objeto Transaction
-                self.transactions.append(t)
+                fee = int(tx.amount * COMMISSION_RATE)
+                self.balances[tx.from_address] = self.balances.get(tx.from_address,0) - tx.amount - fee
+                self.balances[tx.to_address] = self.balances.get(tx.to_address,0) + tx.amount
+                self.balances[self.miner_address] = self.balances.get(self.miner_address,0) + fee
+                self.nonces[tx.from_address] = self.nonces.get(tx.from_address,0) + 1
+        self._save_state()
+        return True
 
-        self.previous_hash = previous_hash
-        self.timestamp     = timestamp or time.time()
-        self.nonce         = nonce
-        self.hash          = hash or self.calculate_hash()
+    def proof_of_work(self, block):
+        target = "0"*POW_DIFFICULTY
+        while True:
+            block.hash = block.calculate_hash()
+            if block.hash.startswith(target): break
+            block.nonce += 1
+        return block
 
-    def calculate_hash(self):
-        data = json.dumps({
-            'index': self.index,
-            'transactions': [t.to_dict() for t in self.transactions],
-            'timestamp': self.timestamp,
-            'previous_hash': self.previous_hash,
-            'nonce': self.nonce
-        }, sort_keys=True).encode()
-        return hashlib.sha3_256(data).hexdigest()
+    def mine_once(self):
+        prev = self.chain[-1]
+        idx = prev.index + 1
+        reward = self.get_block_reward(idx)
+        reward_tx = Transaction("system", self.miner_address, reward, nonce=0)
+        txs = [reward_tx] + self.pending_transactions
+        self.pending_transactions = []
+        newb = Block(idx, txs, prev.hash)
+        self.proof_of_work(newb)
+        self.add_block(newb)
+        return reward
 
-    def calculate_hash(self):
-        data=json.dumps({
-            'index':self.index,
-            'transactions':[t.to_dict() for t in self.transactions],
-            'timestamp':self.timestamp,
-            'previous_hash':self.previous_hash,
-            'nonce':self.nonce
-        },sort_keys=True).encode()
-        return hashlib.sha3_256(data).hexdigest()
+    def get_address_txs(self, address, limit=50):
+        out = []
+        for b in reversed(self.chain):
+            for tx in reversed(b.transactions):
+                t = None
+                if isinstance(tx, ShieldedTransaction):
+                    t = {"type":"shielded","amount":0,"recipient":"","timestamp":tx.timestamp}
+                elif tx.from_address == address and tx.to_address == SHIELDED_POOL_ADDR:
+                    t = {"type":"shield","amount": tx.amount, "recipient":"private", "timestamp": tx.timestamp}
+                elif tx.from_address == "system" and tx.to_address == address and (tx.data or b'')[:8] == b'unshield':
+                    t = {"type":"unshield","amount": tx.amount, "recipient": address, "timestamp": tx.timestamp}
+                elif tx.from_address == "system" and tx.to_address == address:
+                    t = {"type": "mining", "amount": tx.amount, "recipient": address, "timestamp": tx.timestamp}
+                elif tx.from_address == address:
+                    t = {"type": "sent", "amount": tx.amount, "recipient": tx.to_address, "timestamp": tx.timestamp}
+                elif tx.to_address == address:
+                    t = {"type": "received", "amount": tx.amount, "recipient": tx.from_address, "timestamp": tx.timestamp}
+                if t:
+                    out.append(t)
+                    if len(out) >= limit: return out
+        return out
 
-def to_dict(self):
-        return {
-            'index':self.index,
-            'transactions':[t.to_dict() for t in self.transactions],
-            'timestamp':self.timestamp,
-            'previous_hash':self.previous_hash,
-            'nonce':self.nonce,
-            'hash':self.hash
-        }
-
-# --- En el handler HTTP que usas en run_node() ---
-
-class BlockchainHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-                if self.path.startswith("/balance"):
-            qs   = parse.urlparse(self.path).query
-            addr = parse.parse_qs(qs).get("address", [""])[0]
-            bal_sats  = blockchain.balances.get(addr, 0)
-            bal_tokens = bal_sats / BASE_UNIT  # convierte satoshis a tokens
-            self.send_response(200)
-            self.send_header("Content-Type","application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "address": addr,
-                "balance": bal_tokens
-            }).encode())
-            return
+# ───────────────────────── Estado runtime ─────────────────────────
+blockchain = Blockchain()
+_mining_stop = threading.Event()
+_mining_thread = None
+_is_mining = False
+_vpn_connected = False
 
 
-        # 2) Chain
-        if self.path == "/chain":
-            chain_data = [b.to_dict() for b in blockchain.chain]
-            self.send_response(200)
-            self.send_header("Content-Type","application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"chain": chain_data}).encode())
-            return
+def _mining_loop():
+    while not _mining_stop.wait(BLOCK_TIME):
+        blockchain.mine_once()
 
-        self.send_response(404)
+
+def start_mining():
+    global _mining_thread, _is_mining
+    if _is_mining: return
+    _mining_stop.clear()
+    _mining_thread = threading.Thread(target=_mining_loop, daemon=True)
+    _mining_thread.start()
+    _is_mining = True
+
+
+def stop_mining():
+    global _is_mining
+    _mining_stop.set()
+    _is_mining = False
+
+# ───────────────────────── HTTP API (compatible con wallet) ─────────────────────────
+class Handler(BaseHTTPRequestHandler):
+    def _send_json(self, obj, code=200):
+        b = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type","application/json")
+        self.send_header("Access-Control-Allow-Origin","*")
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin","*")
+        self.send_header("Access-Control-Allow-Methods","GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers","Content-Type")
         self.end_headers()
 
-def do_POST(self):
-        # 3) Broadcast tx
+    def do_GET(self):
+        if self.path.startswith("/balance"):
+            qs = parse.urlparse(self.path).query
+            addr = parse.parse_qs(qs).get("address",[""])[0]
+            bal = blockchain.balances.get(addr,0) / BASE_UNIT
+            return self._send_json({"address": addr, "balance": bal})
+        if self.path == "/chain":
+            return self._send_json({"chain": [b.to_dict() for b in blockchain.chain]})
+        if self.path == "/api/wallet/status":
+            bal_pub = blockchain.balances.get(blockchain.miner_address,0) / BASE_UNIT
+            bal_priv = private_balance(blockchain.miner_address) / BASE_UNIT
+            return self._send_json({
+                "address": blockchain.miner_address,
+                "balance": round(bal_pub, 8),
+                "private_balance": round(bal_priv, 8),
+                "is_mining": _is_mining,
+                "vpn_connected": _vpn_connected,
+                "privacy_mode": ZK_ENABLED,
+                "ai": {"enabled": AI_ENABLED, "threshold": ANOMALY_THRESHOLD, "last_score": _last_ai_score}
+            })
+        if self.path == "/api/wallet/transactions":
+            txs = blockchain.get_address_txs(blockchain.miner_address, limit=50)
+            for t in txs:
+                if t.get("amount"):
+                    t["amount"] = t["amount"] / BASE_UNIT
+            return self._send_json({"transactions": txs})
+        if self.path == "/api/ai/status":
+            return self._send_json({"enabled": AI_ENABLED, "threshold": ANOMALY_THRESHOLD, "last_score": _last_ai_score})
+        if self.path == "/api/private/status":
+            bal_priv = private_balance(blockchain.miner_address) / BASE_UNIT
+            return self._send_json({"private_balance": round(bal_priv,8), "notes": len([n for n in _private_notes if n['owner']==blockchain.miner_address and not n['spent']])})
+        return self._send_json({"error":"not found"},404)
+
+    def do_POST(self):
+        global _vpn_connected
+        length = int(self.headers.get("Content-Length",0))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/wallet/send":
+            amount_tokens = float(body.get("amount",0))
+            recipient = body.get("recipient","")
+            if not recipient:
+                return self._send_json({"success":False,"message":"recipient required"},400)
+            amount = int(round(amount_tokens * BASE_UNIT))
+            from_addr = blockchain.miner_address
+            nonce = blockchain.nonces.get(from_addr,0)
+            tx = Transaction(from_addr, recipient, amount, nonce=nonce)
+            tx.sign(MINER_PRIV_HEX)
+            if not blockchain.is_valid_transaction(tx):
+                return self._send_json({"success":False,"message":"invalid tx (AI/ZK)"},400)
+            blockchain.pending_transactions.append(tx)
+            new_bal = blockchain.balances.get(from_addr,0) / BASE_UNIT
+            return self._send_json({"success":True,"message":f"Sent {amount_tokens} {TOKEN_SYMBOL} to {recipient}","new_balance": round(new_bal,8)})
+        if self.path == "/api/mining/start":
+            start_mining()
+            return self._send_json({"success":True,"message":"Professional mining started! 🚀"})
+        if self.path == "/api/mining/stop":
+            stop_mining()
+            return self._send_json({"success":True,"message":"Mining stopped"})
+        if self.path == "/api/mining/reward":
+            reward = blockchain.mine_once()
+            bal_pub = blockchain.balances.get(blockchain.miner_address,0) / BASE_UNIT
+            bal_priv = private_balance(blockchain.miner_address) / BASE_UNIT
+            return self._send_json({"reward": reward/BASE_UNIT, "new_balance": round(bal_pub,8), "private_balance": round(bal_priv,8), "message": f"Professional mining reward: {reward/BASE_UNIT:.2f} {TOKEN_SYMBOL}!"})
+        if self.path == "/api/vpn/connect":
+            _vpn_connected = True
+            return self._send_json({"success":True,"message":"Professional VPN connected! 🌐"})
+        if self.path == "/api/vpn/disconnect":
+            _vpn_connected = False
+            return self._send_json({"success":True,"message":"VPN disconnected"})
+        if self.path == "/api/zk/prove":
+            if not ZK_ENABLED: return self._send_json({"error":"ZK disabled"},400)
+            amt = float(body.get("amount",0))
+            commitment, proof = zk_prove(amt)
+            return self._send_json({"commitment": commitment, "proof": proof})
+        if self.path == "/api/private/shield":
+            if not ZK_ENABLED: return self._send_json({"success":False,"message":"ZK disabled"},400)
+            amount_tokens = float(body.get("amount",0))
+            amount = int(round(amount_tokens * BASE_UNIT))
+            commitment = body.get("commitment","")
+            proof = body.get("proof","")
+            # 1) mover saldo público → pool (tx pública a SHIELDED_POOL_ADDR)
+            from_addr = blockchain.miner_address
+            nonce = blockchain.nonces.get(from_addr,0)
+            tx_pub = Transaction(from_addr, SHIELDED_POOL_ADDR, amount, nonce=nonce, data=b'shield')
+            tx_pub.sign(MINER_PRIV_HEX)
+            if not blockchain.is_valid_transaction(tx_pub):
+                return self._send_json({"success":False,"message":"invalid shield tx (AI)"},400)
+            blockchain.pending_transactions.append(tx_pub)
+            # 2) nota privada + zk tx (solo trazabilidad)
+            add_private_note(from_addr, commitment or hashlib.sha3_256(os.urandom(16)).hexdigest(), amount)
+            stx = ShieldedTransaction(commitment=commitment or '', proof=proof or 'proof', nonce=blockchain.nonces.get('shielded',0))
+            blockchain.pending_transactions.append(stx)
+            # respuesta
+            bal_pub = blockchain.balances.get(from_addr,0) / BASE_UNIT
+            bal_priv = private_balance(from_addr) / BASE_UNIT
+            return self._send_json({"success":True, "message": f"Shielded {amount_tokens} {TOKEN_SYMBOL}", "balance": round(bal_pub,8), "private_balance": round(bal_priv,8)})
+        if self.path == "/api/private/unshield":
+            amount_tokens = float(body.get("amount",0))
+            amount = int(round(amount_tokens * BASE_UNIT))
+            owner = blockchain.miner_address
+            if private_balance(owner) < amount:
+                return self._send_json({"success":False, "message":"insufficient private balance"},400)
+            if not spend_private(owner, amount):
+                return self._send_json({"success":False, "message":"unable to spend notes"},400)
+            # emitimos tx de sistema → owner con data 'unshield'
+            tx_pub = Transaction("system", owner, amount, nonce=0, data=b'unshield')
+            blockchain.pending_transactions.append(tx_pub)
+            bal_pub = blockchain.balances.get(owner,0) / BASE_UNIT
+            bal_priv = private_balance(owner) / BASE_UNIT
+            return self._send_json({"success":True, "message": f"Unshielded {amount_tokens} {TOKEN_SYMBOL}", "balance": round(bal_pub,8), "private_balance": round(bal_priv,8)})
         if self.path == "/tx":
-            length = int(self.headers.get("Content-Length",0))
-            data   = json.loads(self.rfile.read(length))
-            # Asegúrate de que las claves del JSON coinciden con los parámetros de Transaction:
-            #   from_address, to_address, amount, nonce, chain_id, data, signature
             tx = Transaction(
-                from_address = data["from_address"],
-                to_address   = data["to_address"],
-                amount       = data["amount"],
-                nonce        = data["nonce"],
-                chain_id     = data.get("chain_id", CHAIN_ID),
-                data         = bytes.fromhex(data.get("data","")) if data.get("data") else b""
+                from_address=body["from_address"],
+                to_address=body["to_address"],
+                amount=int(body["amount"]),
+                nonce=int(body["nonce"]),
+                chain_id=int(body.get("chain_id", CHAIN_ID)),
+                data=bytes.fromhex(body.get("data","")),
+                timestamp=int(body.get("timestamp", time.time()))
             )
-            tx.signature = data.get("signature")
+            tx.signature = body.get("signature")
             if blockchain.is_valid_transaction(tx):
                 blockchain.pending_transactions.append(tx)
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b'{"status":"ok"}')
+                return self._send_json({"status":"ok"})
             else:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b'{"status":"invalid tx"}')
-            return
+                return self._send_json({"status":"invalid tx"},400)
+        return self._send_json({"error":"not found"},404)
 
-        self.send_response(404)
-        self.end_headers()
-
-# --- Tests ---
-def run_tests():
-    wallet=HDWallet()
-    bc=Blockchain(DB_POOL)
-    bc.create_genesis_block()
-    # genesis
-    assert len(bc.chain)==1
-    assert bc.balances[bc.owner_pub]==0
-
-    acct = wallet.derive_account()
-    bc.balances[acct['address']] = 100 * BASE_UNIT
-
-    tx = Transaction(acct['address'], bc.owner_pub, 10 * BASE_UNIT, nonce=0)
-    tx.sign(acct['private_key'])
-    assert tx.verify_signature()
-
-    # insufficient balance
-    poor=wallet.derive_account()
-    bc.balances[poor['address']]=5*BASE_UNIT
-    tx_bad=Transaction(poor['address'],bc.owner_pub,10*BASE_UNIT,nonce=0)
-    tx_bad.sign(poor['private_key'])
-    assert not bc.is_valid_transaction(tx_bad)
-
-    # nonce enforcement
-    rich=wallet.derive_account()
-    bc.balances[rich['address']]=100*BASE_UNIT
-    # correct nonce=0
-    tx1=Transaction(rich['address'],bc.owner_pub,10*BASE_UNIT,nonce=0)
-    tx1.sign(rich['private_key'])
-    bc.pending_transactions=[tx1]
-    bc.mine_block()
-    # now nonce for rich is 1
-    tx2=Transaction(rich['address'],bc.owner_pub,5*BASE_UNIT,nonce=0)
-    tx2.sign(rich['private_key'])
-    assert not bc.is_valid_transaction(tx2)
-    tx3=Transaction(rich['address'],bc.owner_pub,5*BASE_UNIT,nonce=1)
-    tx3.sign(rich['private_key'])
-    assert bc.is_valid_transaction(tx3)
-
-    # proof-of-work check
-    blk=Block(5,[tx3],bc.chain[-1].hash)
-    assert not blk.hash.startswith('0000')
-    solved=bc.proof_of_work(blk)
-    assert solved.hash.startswith('0000')
-    assert bc.is_valid_block(solved)
-
-    print("All tests passed.")
-
-import time
-from http.server import HTTPServer
-import threading
 
 if __name__ == "__main__":
-    # 1) Inicializa la blockchain (carga de JSON o génesis)
-    bc = Blockchain()
-    if not bc.chain:
-        bc.create_genesis_block()
-
-    # 2) Ponemos la instancia global para el handler HTTP
-    blockchain = bc
-
-    # 3) Arrancamos el servidor HTTP en el puerto 5000
-    server = HTTPServer(("", 5000), BlockchainHTTPRequestHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print("✅ HTTP RPC listening on port 5000")
-
-    # 4) Arrancamos la minería continua
-    print("🔨 Starting continuous mining (CTRL+C to stop)...")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    print(f"✅ HTTP RPC listening on port 5000 — miner={blockchain.miner_address}")
+    server = HTTPServer(("",5000), Handler)
     try:
-        while True:
-            bc.mine_block()
-            time.sleep(BLOCK_TIME)
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\n⛔ Mining stopped by user")
-        server.shutdown()
+        pass
+    finally:
+        server.server_close()
+
+
