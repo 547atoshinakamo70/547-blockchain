@@ -473,7 +473,8 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, obj, code=200):
         b = json.dumps(obj).encode()
         self.send_response(code)
-        self.send_header("Content-Type","application/json")
+        self.send_header("Access-Control-Allow-Origin","*")
++        self.send_header("Access-Control-Allow-Private-Network","true")
         self.send_header("Access-Control-Allow-Origin","*")
         self.end_headers()
         self.wfile.write(b)
@@ -486,6 +487,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if self.path == "/health":
+            return self._send_json({"ok": True, "version": "5470-chain-ai-zk"})
         if self.path.startswith("/balance"):
             qs = parse.urlparse(self.path).query
             addr = parse.parse_qs(qs).get("address",[""])[0]
