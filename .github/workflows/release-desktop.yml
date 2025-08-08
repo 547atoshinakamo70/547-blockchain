@@ -2,7 +2,9 @@ name: Build Desktop Installers
 on:
   push:
     tags: [ "v*" ]
-  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-release:
@@ -23,44 +25,40 @@ jobs:
         uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
-      - name: Install web deps
+      # Si tu UI está en webapp/, se compila antes y luego la copia tu build script
+      - name: Build webapp (si existe)
+        if: ${{ hashFiles('webapp/package.json') != '' }}
         working-directory: webapp
         run: |
-          npm ci
+          npm ci || npm install
           npm run build
 
-      - name: Build bridge (PyInstaller)
+      # Construir bridge si existe (PyInstaller)
+      - name: Build bridge (si existe)
+        if: ${{ hashFiles('p2p_bridge/bridge.py') != '' }}
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller -r p2p_bridge/requirements.txt
           pyinstaller -F p2p_bridge/bridge.py -n bridge
         shell: bash
 
-      - name: Prepare desktop payload
-        run: |
-          mkdir -p desktop/dist desktop/bin
-          # copiar UI
-          cp -r webapp/dist/* desktop/dist/
-          # copiar binario del bridge
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp dist/bridge.exe desktop/bin/bridge.exe
-          else
-            cp dist/bridge desktop/bin/bridge
-            chmod +x desktop/bin/bridge
-          fi
-
-      - name: Install electron deps
+      # Instalar deps y construir instaladores con electron-builder
+      - name: Install deps (Electron)
         working-directory: desktop
-        run: npm ci
+        run: npm ci || npm install
 
       - name: Build installers
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build
+        run: npx electron-builder
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v1
+      - name: Upload artifacts to Release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: desktop/release/**
+          name: "Release ${{ github.ref_name }}"
+          files: |
+            desktop/release/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
