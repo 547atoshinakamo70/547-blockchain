@@ -1,0 +1,51 @@
+name: Manual Release (Electron)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to publish (e.g. v1.0.1)"
+        required: true
+        default: "v1.0.1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ⬇️ AJUSTA ESTA RUTA si tu package.json no está en "desktop"
+      - name: Install deps
+        working-directory: desktop
+        run: |
+          npm ci || npm install
+
+      - name: Build installers
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx electron-builder -c.extraMetadata.version=${{ github.event.inputs.version }}
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "Release ${{ github.event.inputs.version }}"
+          files: |
+            desktop/release/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
