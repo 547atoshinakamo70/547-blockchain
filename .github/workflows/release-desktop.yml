@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (ej. v1.2.3). Si lo dejas vacío y no hay tag, fallará."
+        description: "Version (ej. v1.2.3)"
         required: false
         default: ""
 
@@ -29,7 +29,6 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
-      # Compila la PWA si existe en webapp/
       - name: Build webapp (si existe)
         if: ${{ hashFiles('webapp/package.json') != '' }}
         working-directory: webapp
@@ -37,7 +36,6 @@ jobs:
           npm ci || npm install
           npm run build
 
-      # Empaqueta el bridge si existe (PyInstaller)
       - name: Build bridge (si existe)
         if: ${{ hashFiles('p2p_bridge/bridge.py') != '' }}
         run: |

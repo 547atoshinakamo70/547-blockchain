@@ -1,0 +1,11 @@
+name: Smoke
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "✅ Actions funciona en este repo. Commit: $GITHUB_SHA"
