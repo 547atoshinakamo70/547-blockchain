@@ -1,0 +1,1 @@
+// futuro: ipcRenderer, etc.
