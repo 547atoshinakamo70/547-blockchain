@@ -57,6 +57,28 @@ HybridChain** is a next-generation blockchain designed by Rami Bond, featuring:
 
 ---
 
+## ⚙️ Configuration
+
+Network parameters are stored in `config.json`:
+
+```json
+{
+  "token_symbol": "5470",
+  "base_unit": 100000000,
+  "chain_id": 5470,
+  "block_time": 5,
+  "block_reward": 50,
+  "commission_rate": 0.002,
+  "pow_difficulty": 4,
+  "ai_enabled": true,
+  "zk_enabled": true
+}
+```
+
+Edit this file to customize your network before launching the node or wallet.
+
+---
+
 ## 🖥️ How to Run the Blockchain
 
 1. **Activate your virtual environment**:

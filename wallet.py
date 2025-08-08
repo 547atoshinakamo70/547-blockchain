@@ -19,8 +19,15 @@ from eth_utils import to_checksum_address
 # ─── Configuration ───────────────────────────────────────────────────────────
 RPC_URL   = os.getenv("NODE_RPC", "http://localhost:5000")
 KEY_FILE  = os.path.expanduser("~/.mywallet_key")
-BASE_UNIT = 10**8
-CHAIN_ID  = 60
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
+if os.path.exists(CONFIG_FILE):
+    with open(CONFIG_FILE) as f:
+        _config = json.load(f)
+else:
+    _config = {}
+BASE_UNIT = _config.get("base_unit", 10**8)
+CHAIN_ID  = _config.get("chain_id", 60)
+TOKEN_SYMBOL = _config.get("token_symbol", "tokens")
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 def load_or_create_key():
@@ -90,7 +97,7 @@ def balance(ctx):
     """Show on‐chain balance."""
     addr = ctx.obj["addr"]
     bal  = ctx.obj["chain"].get_balance(addr)
-    click.echo(f"Balance for {addr}: {bal/BASE_UNIT:.8f} tokens")
+    click.echo(f"Balance for {addr}: {bal/BASE_UNIT:.8f} {TOKEN_SYMBOL}")
 
 @cli.command()
 @click.argument("to")
@@ -133,7 +140,7 @@ def send(ctx, to, amount):
 
     # Broadcast
     if client.broadcast_tx(tx):
-        click.secho(f"✅ Sent {amount:.8f} tokens to {to} (nonce={nonce})", fg="green")
+        click.secho(f"✅ Sent {amount:.8f} {TOKEN_SYMBOL} to {to} (nonce={nonce})", fg="green")
     else:
         click.secho("❌ Transaction failed", fg="red")
 
@@ -165,7 +172,7 @@ def verify(msg, sig):
 @click.pass_context
 def coinjoin(ctx, amount, peers):
     """(Stub) Create a CoinJoin session with N peers."""
-    click.echo(f"CoinJoin of {amount} tokens with {peers} peers is not implemented yet.")
+    click.echo(f"CoinJoin of {amount} {TOKEN_SYMBOL} with {peers} peers is not implemented yet.")
 
 if __name__ == "__main__":
     cli()
