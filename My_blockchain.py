@@ -24,22 +24,29 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHAIN_FILE = os.path.join(BASE_DIR, 'chain_data.json')
 BALANCES_FILE = os.path.join(BASE_DIR, 'balances.json')
 PRIVATE_NOTES_FILE = os.path.join(BASE_DIR, 'private_notes.json')
+CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 
-TOKEN_SYMBOL = '5470'
-BASE_UNIT = 10 ** 8                 # unidad mínima (sats)
-CHAIN_ID = 5470                     # tu chain-id
-BLOCK_TIME = 5                      # cada 5s (match UI)
-BLOCK_REWARD_INITIAL = 50 * BASE_UNIT
-COMMISSION_RATE = 0.002             # 0.2 %
-POW_DIFFICULTY = 4                  # 4 ceros
+if os.path.exists(CONFIG_FILE):
+    with open(CONFIG_FILE) as f:
+        _config = json.load(f)
+else:
+    _config = {}
+
+TOKEN_SYMBOL = _config.get('token_symbol', '5470')
+BASE_UNIT = int(_config.get('base_unit', 10 ** 8))        # unidad mínima (sats)
+CHAIN_ID = _config.get('chain_id', 5470)                  # tu chain-id
+BLOCK_TIME = _config.get('block_time', 5)                 # cada 5s (match UI)
+BLOCK_REWARD_INITIAL = int(_config.get('block_reward', 50) * BASE_UNIT)
+COMMISSION_RATE = _config.get('commission_rate', 0.002)   # 0.2 %
+POW_DIFFICULTY = _config.get('pow_difficulty', 4)         # 4 ceros
 
 # Dirección lógica del pool de shield (solo contabilidad pública)
 SHIELDED_POOL_ADDR = 'shielded_pool'
 
 # ── IA/ZK opcionales ──────────────────────────
-AI_ENABLED = True
-ZK_ENABLED = True
-ANOMALY_THRESHOLD = 0.10
+AI_ENABLED = _config.get('ai_enabled', True)
+ZK_ENABLED = _config.get('zk_enabled', True)
+ANOMALY_THRESHOLD = _config.get('anomaly_threshold', 0.10)
 _last_ai_score = 0.0
 
 try:
@@ -474,8 +481,7 @@ class Handler(BaseHTTPRequestHandler):
         b = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin","*")
-+        self.send_header("Access-Control-Allow-Private-Network","true")
-        self.send_header("Access-Control-Allow-Origin","*")
+        self.send_header("Access-Control-Allow-Private-Network","true")
         self.end_headers()
         self.wfile.write(b)
 
