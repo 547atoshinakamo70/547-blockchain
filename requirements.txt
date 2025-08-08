@@ -8,3 +8,4 @@ web3
 eth-keys
 eth-utils
 git+https://github.com/meilof/pysnark
+click>=8.1,<9
