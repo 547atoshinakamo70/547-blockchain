@@ -7,5 +7,4 @@ python-dotenv
 web3
 eth-keys
 eth-utils
-pysnark
-py-evm
+git+https://github.com/meilof/pysnark
