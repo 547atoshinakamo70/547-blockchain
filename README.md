@@ -142,6 +142,10 @@ Edit this file to customize your network before launching the node or wallet.
 * **Step 3:** Use your wallet to receive mined tokens and send transactions
 * **Step 4:** (Optional) Enable CoinJoin for maximum privacy
 
+## 📦 Automated Releases
+
+A GitHub Actions workflow publishes a release whenever a tag starting with `v` is pushed. It installs dependencies, performs a compilation check, and automatically generates release notes.
+
 ---
 
 If you want, I can now **generate this README as a professional PDF with charts** showing:
