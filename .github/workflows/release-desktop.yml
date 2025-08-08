@@ -2,6 +2,12 @@ name: Build Desktop Installers
 on:
   push:
     tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (ej. v1.2.3). Si lo dejas vacío y no hay tag, fallará."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -11,21 +17,19 @@ jobs:
     name: ${{ matrix.os }} build
     runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+      matrix: { os: [ubuntu-latest, windows-latest, macos-latest] }
 
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with: { node-version: '20' }
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
-      # Si tu UI está en webapp/, se compila antes y luego la copia tu build script
+      # Compila la PWA si existe en webapp/
       - name: Build webapp (si existe)
         if: ${{ hashFiles('webapp/package.json') != '' }}
         working-directory: webapp
@@ -33,7 +37,7 @@ jobs:
           npm ci || npm install
           npm run build
 
-      # Construir bridge si existe (PyInstaller)
+      # Empaqueta el bridge si existe (PyInstaller)
       - name: Build bridge (si existe)
         if: ${{ hashFiles('p2p_bridge/bridge.py') != '' }}
         run: |
@@ -42,7 +46,6 @@ jobs:
           pyinstaller -F p2p_bridge/bridge.py -n bridge
         shell: bash
 
-      # Instalar deps y construir instaladores con electron-builder
       - name: Install deps (Electron)
         working-directory: desktop
         run: npm ci || npm install
@@ -51,13 +54,18 @@ jobs:
         working-directory: desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            npx electron-builder -c.extraMetadata.version=${{ github.event.inputs.version }}
+          else
+            npx electron-builder
+          fi
 
-      - name: Upload artifacts to Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Release ${{ github.ref_name }}"
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          name: "Release ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}"
           files: |
             desktop/release/**
         env:
