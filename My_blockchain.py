@@ -635,3 +635,13 @@ if __name__ == "__main__":
         server.server_close()
 
 
+
+# --- añadido para comprobación rápida desde la PWA/bridge ---
+try:
+    from flask import Flask
+    app  # asume que ya existe
+    @app.route("/health")
+    def health():
+        return {"ok": True}, 200
+except Exception:
+    pass
