@@ -1,5 +1,0 @@
-name = "block547-proxy"
-main = "src/worker.js"
-compatibility_date = "2024-11-21"
-[vars]
-ORIGIN = "http://2.137.118.154:5000"
